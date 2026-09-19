@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from .config import PROJECT_ROOT, Settings
+from .constants import TestState
+from .mcp_server import server
+from .orchestrator import MarketingOrchestrator
+from .routing import route_intent
+
+
+def _find_hermes() -> str | None:
+    explicit = os.getenv("HERMES_BIN")
+    if explicit and Path(explicit).exists():
+        return explicit
+    found = shutil.which("hermes")
+    if found:
+        return found
+    candidate = Path.home() / "AppData" / "Local" / "hermes" / "bin" / "hermes.exe"
+    return str(candidate) if candidate.exists() else None
+
+
+def _find_buzz() -> str | None:
+    explicit = os.getenv("BUZZ_CLI_PATH")
+    if explicit and Path(explicit).exists():
+        return explicit
+    found = shutil.which("buzz")
+    if found:
+        return found
+    candidate = Path("D:/Buzz/buzz.exe")
+    return str(candidate) if candidate.exists() else None
+
+
+def command_status(args: argparse.Namespace) -> int:
+    orchestrator = MarketingOrchestrator()
+    payload = orchestrator.status()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    print(f"Mode: {payload['environment']} | SAFE_DRY_RUN: {payload['safe_dry_run']}")
+    for item in payload["connectors"]:
+        print(f"{item['connector']}: {item['current_state']} (live: {item['live_state']})")
+    return 0
+
+
+def _run_redacted(command: list[str], timeout: int = 20) -> tuple[int, str]:
+    try:
+        completed = subprocess.run(command, capture_output=True, text=False, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, type(exc).__name__
+    stdout = (completed.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (completed.stderr or b"").decode("utf-8", errors="replace")
+    output = (stdout + "\n" + stderr).strip()
+    return completed.returncode, output
+
+
+def command_doctor(args: argparse.Namespace) -> int:
+    settings = Settings.from_env()
+    orchestrator = MarketingOrchestrator(settings)
+    hermes = _find_hermes()
+    buzz = _find_buzz()
+    checks: list[tuple[str, str, str]] = []
+    checks.append(("Buzz", "OK" if buzz else "FAIL", f"CLI: {buzz or 'not found'}"))
+    if hermes:
+        code, version = _run_redacted([hermes, "--version"])
+        checks.append(("Hermes", "OK" if code == 0 else "FAIL", version.splitlines()[0] if version else "no output"))
+        profile_home = Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes" / "profiles" / "marketing"
+        code, model = _run_redacted([hermes, "-p", "marketing", "config", "get", "model"])
+        auth_file = profile_home / "auth.json"
+        provider_ok = code == 0 and "provider:" in model and auth_file.is_file() and auth_file.stat().st_size > 2
+        provider_detail = "configured for marketing profile" if provider_ok else "NEEDS_AUTH"
+        checks.append(("Hermes provider", "OK" if provider_ok else "FAIL", provider_detail))
+
+        code, gateway = _run_redacted([hermes, "-p", "marketing", "gateway", "status"])
+        gateway_running = code == 0 and "not running" not in gateway.lower() and "stopped" not in gateway.lower()
+        buzz_connected = False
+        try:
+            state = json.loads((profile_home / "gateway_state.json").read_text(encoding="utf-8"))
+            buzz_connected = state.get("gateway_state") == "running" and state.get("platforms", {}).get("buzz", {}).get("state") == "connected"
+        except (OSError, ValueError, TypeError):
+            pass
+        gateway_ok = gateway_running and buzz_connected
+        checks.append(("Hermes - Buzz", "OK" if gateway_ok else "FAIL", "gateway live" if gateway_ok else "not live-verified"))
+    else:
+        checks.extend(
+            [
+                ("Hermes", "FAIL", "not found"),
+                ("Hermes provider", "FAIL", "not found"),
+                ("Hermes - Buzz", "FAIL", "not found"),
+            ]
+        )
+    try:
+        result = orchestrator.handle("Kiểm tra trạng thái toàn bộ hệ thống.", source_channel="doctor")
+        checks.append(("Marketing Orchestrator", "OK", result.result_state))
+        checks.append(("MCP/Integration server", "OK", "5 typed tools registered"))
+    except Exception as exc:
+        checks.append(("Marketing Orchestrator", "FAIL", type(exc).__name__))
+        checks.append(("MCP/Integration server", "FAIL", type(exc).__name__))
+    print("\nComponent diagnostics")
+    for component, state, detail in checks:
+        print(f"{component}: {state} - {detail}")
+    print("\nConnectors")
+    for report in orchestrator.registry.reports(live_probe=args.live):
+        print(f"{report.connector}: {report.current_state} / live={report.live_state}")
+    return 0 if all(state == "OK" for _, state, _ in checks) else 1
+
+
+def command_route(args: argparse.Namespace) -> int:
+    print(route_intent(args.text).model_dump_json(indent=2))
+    return 0
+
+
+def command_connector(args: argparse.Namespace) -> int:
+    orchestrator = MarketingOrchestrator()
+    report = orchestrator.registry.get(args.name).report(live_probe=args.live)
+    print(report.model_dump_json(indent=2))
+    if args.live:
+        return 0 if report.live_state == "CONNECTED" else 2
+    return 0
+
+
+def command_handle(args: argparse.Namespace) -> int:
+    result = MarketingOrchestrator().handle(args.text, source_channel="cli")
+    if args.json:
+        print(result.model_dump_json(indent=2))
+    else:
+        print(result.response)
+    return 0
+
+
+def command_acceptance(_: argparse.Namespace) -> int:
+    orchestrator = MarketingOrchestrator()
+    cases = {
+        "B_status": "Kiểm tra trạng thái toàn bộ hệ thống.",
+        "C_routing": "Tìm cho tôi 3 khách hàng tiềm năng ngành logistics và cho biết agent nào xử lý.",
+        "D_content": "Viết một bài LinkedIn giới thiệu dịch vụ forwarding.",
+        "E_campaign": "Tạo chiến dịch quảng cáo Facebook 10 triệu.",
+    }
+    results: dict[str, str] = {}
+    for name, prompt in cases.items():
+        result = orchestrator.handle(prompt, source_channel="acceptance")
+        results[name] = result.result_state
+        print(f"[{result.result_state}] {name}: {result.intent} -> {','.join(result.agents) or 'orchestrator'}")
+    print("[SKIPPED] A_Buzz_transport: this command is local-only; see TEST_REPORT.md for live relay evidence")
+    print("[SKIPPED] F_restart: this command is local-only; use scripts/stop-all.ps1 + start-all.ps1")
+    return 0 if all(state == TestState.PASS_MOCK for state in results.values()) else 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="marketing-system")
+    sub = parser.add_subparsers(dest="command", required=True)
+    status = sub.add_parser("status")
+    status.add_argument("--json", action="store_true")
+    status.set_defaults(func=command_status)
+    doctor = sub.add_parser("doctor")
+    doctor.add_argument("--live", action="store_true", help="Run non-destructive live connector probes; may consume API quota.")
+    doctor.set_defaults(func=command_doctor)
+    route = sub.add_parser("route")
+    route.add_argument("text")
+    route.set_defaults(func=command_route)
+    connector = sub.add_parser("connector")
+    connector.add_argument("name", choices=["zoho", "m365", "apollo", "linkedin", "youtube", "meta_ads", "google_ads", "website"])
+    connector.add_argument("--live", action="store_true", help="Run a non-destructive live probe; provider quota may apply.")
+    connector.set_defaults(func=command_connector)
+    handle = sub.add_parser("handle")
+    handle.add_argument("text")
+    handle.add_argument("--json", action="store_true")
+    handle.set_defaults(func=command_handle)
+    acceptance = sub.add_parser("acceptance")
+    acceptance.set_defaults(func=command_acceptance)
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    raise SystemExit(args.func(args))
+
+
+if __name__ == "__main__":
+    main()

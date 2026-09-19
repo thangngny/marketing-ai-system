@@ -1,0 +1,36 @@
+[project]
+name = "local-ai-marketing-system"
+version = "0.1.0"
+description = "Local-first Hermes/Buzz marketing integration and mock connector layer"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+  "httpx>=0.28.1,<1",
+  "mcp>=2.2.0,<3",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
+]
+
+[project.scripts]
+marketing-system = "marketing_system.cli:main"
+marketing-mcp = "marketing_system.mcp_server:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-cov>=6,<8",
+]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marketing_system"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["marketing_system"]
+
