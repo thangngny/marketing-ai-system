@@ -1,5 +1,6 @@
 from marketing_system.config import Settings
 from marketing_system.connectors import ConnectorRegistry
+from marketing_system.connectors.youtube import YouTubeConnector
 from marketing_system.constants import ConnectorState, Environment
 
 
@@ -23,6 +24,67 @@ def test_apollo_declares_credit_semantics(tmp_path):
     assert "0 credits" in costs["people_search"]
     assert "1 Apollo credit" in costs["organization_search"]
     assert "consumes credits" in costs["people_enrichment"]
+
+
+def test_youtube_read_recent_videos_normalizes_to_channel_posts(monkeypatch, tmp_path):
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "items": [
+                    {
+                        "id": {"videoId": "abc123"},
+                        "snippet": {
+                            "title": "Ra mắt dịch vụ forwarding mới",
+                            "description": "Video giới thiệu",
+                            "publishedAt": "2026-09-20T10:00:00Z",
+                            "channelId": "UC_test",
+                            "channelTitle": "Công ty Test",
+                        },
+                    }
+                ]
+            }
+
+    captured = {}
+
+    def fake_request(_self, method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["params"] = kwargs.get("params")
+        return Response()
+
+    monkeypatch.setattr(YouTubeConnector, "request", fake_request)
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+    monkeypatch.setenv("YOUTUBE_CHANNEL_ID", "UC_test")
+    settings = Settings(environment=Environment.PRODUCTION, data_dir=tmp_path, log_dir=tmp_path)
+    connector = YouTubeConnector(settings)
+
+    records = connector.read("recent_videos", limit=5, correlation_id="test-corr")
+
+    assert len(records) == 1
+    post = records[0]
+    assert post.source == "youtube"
+    assert post.channel_post_id == "abc123"
+    assert post.title == "Ra mắt dịch vụ forwarding mới"
+    assert post.metadata["url"] == "https://www.youtube.com/watch?v=abc123"
+    assert captured["params"]["channelId"] == "UC_test"
+
+
+def test_youtube_read_requires_channel_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+    monkeypatch.delenv("YOUTUBE_CHANNEL_ID", raising=False)
+    settings = Settings(environment=Environment.PRODUCTION, data_dir=tmp_path, log_dir=tmp_path)
+    connector = YouTubeConnector(settings)
+    try:
+        connector.read("recent_videos")
+        assert False, "expected RuntimeError"
+    except RuntimeError:
+        pass
 
 
 def test_every_connector_has_deterministic_labeled_mock_data(tmp_path):

@@ -65,7 +65,7 @@ def marketing_request_execution(action: str, explicit_approval: bool = False) ->
 @server.tool()
 def marketing_sync_readonly(connector: str, resource: str, limit: int = 25) -> ReadonlySyncResult:
     """Live-verify a connector, read bounded provider data, normalize it, and stage it locally."""
-    if connector not in {"zoho", "m365", "website"}:
+    if connector not in {"zoho", "m365", "website", "youtube"}:
         return ReadonlySyncResult(
             state="UNSUPPORTED_CONNECTOR",
             connector=connector,

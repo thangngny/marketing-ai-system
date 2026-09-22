@@ -5,7 +5,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from .constants import Environment
-from .models import Account, Activity, Contact, Deal, Lead, SourceReference, Task
+from .models import Account, Activity, ChannelPost, Contact, Deal, Lead, SourceReference, Task
 
 
 def stable_id(source: str, entity_type: str, external_id: str) -> str:
@@ -121,6 +121,32 @@ def normalize_graph_message(
             "received_at": record.get("receivedDateTime"),
             "is_read": record.get("isRead"),
             "web_url": record.get("webLink"),
+        },
+    )
+
+
+def normalize_youtube_video(
+    record: dict[str, Any], *, environment: Environment, correlation_id: str
+) -> ChannelPost:
+    video_id = str(record["id"]["videoId"])
+    snippet = record.get("snippet", {})
+    return ChannelPost(
+        id=stable_id("youtube", "video", video_id),
+        external_id=video_id,
+        source="youtube",
+        environment=environment,
+        correlation_id=correlation_id,
+        synthetic=False,
+        title=str(snippet.get("title") or "Untitled video"),
+        channel="youtube",
+        body=str(snippet.get("description") or ""),
+        publication_state="published",
+        channel_post_id=video_id,
+        created_at=_parse_datetime(snippet.get("publishedAt")) or datetime.now().astimezone(),
+        metadata={
+            "channel_id": snippet.get("channelId"),
+            "channel_title": snippet.get("channelTitle"),
+            "url": f"https://www.youtube.com/watch?v={video_id}",
         },
     )
 
