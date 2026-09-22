@@ -8,7 +8,7 @@ from marketing_system.connectors import ConnectorRegistry
 
 REQUIRED = {
     "zoho": ("ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN"),
-    "m365": ("MS_GRAPH_ACCESS_TOKEN",),
+    "m365": ("MS_TENANT_ID", "MS_CLIENT_ID", "MS_REFRESH_TOKEN"),
     "apollo": ("APOLLO_API_KEY",),
     "linkedin": ("LINKEDIN_ACCESS_TOKEN",),
     "youtube": ("YOUTUBE_API_KEY",),
@@ -20,10 +20,12 @@ REQUIRED = {
 
 @pytest.mark.parametrize("name", list(REQUIRED))
 def test_live_probe_when_authorized(name):
-    missing = [key for key in REQUIRED[name] if not os.getenv(key)]
+    if os.getenv("RUN_LIVE_CONNECTOR_TESTS") != "1":
+        pytest.skip("SKIPPED_NEEDS_AUTH: set RUN_LIVE_CONNECTOR_TESTS=1 for explicit live probes")
+    connector = ConnectorRegistry(Settings.from_env()).get(name)
+    _, missing = connector.credential_presence()
     if missing:
         pytest.skip(f"SKIPPED_NEEDS_AUTH: {name} missing {','.join(missing)}")
-    report = ConnectorRegistry(Settings.from_env()).get(name).report(live_probe=True)
+    report = connector.report(live_probe=True)
     assert report.live_tested is True
     assert report.live_state == "CONNECTED"
-

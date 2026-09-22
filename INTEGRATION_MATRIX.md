@@ -1,22 +1,22 @@
 # Integration Matrix
 
-Snapshot: 2026-09-19. `CONNECTED` is used only after a successful live probe. No external connector has been live-tested in this phase.
+Snapshot: 2026-09-22. `CONNECTED` is used only after a successful live probe.
 
 | SERVICE | PURPOSE | SOFTWARE_READY? | CONNECTOR_READY? | AUTH_READY? | LIVE_TESTED? | CURRENT_MODE | BLOCKER | NEXT_STEP |
 |---|---|---|---|---|---|---|---|---|
 | Buzz Desktop | Human chat surface | INSTALLED 0.5.23 | Hermes native plugin present | Dedicated bot identity + NIP-OA configured | Yes | LIVE_VERIFIED | Desktop GUI was not automated; relay/CLI events verified | Open `Welcome` and chat normally |
 | Hermes | Orchestrator/runtime | INSTALLED 0.21.3 | Profile `marketing` configured | OpenAI Codex OAuth | Yes | CONNECTED | — | Keep profile isolated |
 | Hermes ↔ Buzz | Primary transport | Software present | Native gateway configured | Owner allowlist + bot channel role verified | Yes | CONNECTED + LIVE_VERIFIED | — | Monitor with `doctor.ps1` |
-| Marketing MCP | Routing/tool boundary | INSTALLED in project `.venv` | 5 tools enabled in profile | Not required | Yes, local stdio | CONNECTED_LOCAL | — | Keep local and pinned |
+| Marketing MCP | Routing/tool boundary | INSTALLED in project `.venv` | 6 tools enabled in profile | Not required | Yes, local stdio | CONNECTED_LOCAL | — | Keep local and pinned |
 | SQLite staging | Canonical mock/staging store | Python stdlib | Ready | Not required | Yes | MOCK_READY | — | Use production namespace only after live source verification |
-| Zoho CRM | Leads, contacts, accounts, deals, tasks | REST client ready | OAuth refresh + org probe + mock adapter | No | No | MOCK_READY + NEEDS_AUTH | CRM account/app/tokens missing | Create Zoho app, grant least privilege, run connector probe |
-| Microsoft 365 | Mail drafts/metadata, calendar, files | REST client ready | Graph token probe + mock adapter | No | No | MOCK_READY + NEEDS_AUTH | Tenant/app/OAuth missing | Register Entra app, consent delegated scopes, run probe |
-| Apollo | People/company search and enrichment | REST client ready | No-credit auth probe + cost metadata + mocks | No | No | MOCK_READY + NEEDS_AUTH | Account/API key missing | Add API key; probe uses `/auth/health` only |
-| LinkedIn | Page/account read and post drafts | REST client ready | OAuth/access-state adapter + mocks | No | No | MOCK_READY + NEEDS_ACCESS | App, OAuth, and product approval missing | Create app and request required product access |
-| YouTube | Channel/video metadata and future analytics | REST client ready | API-key read probe + mocks | No | No | MOCK_READY + NEEDS_AUTH | Google project/API key/OAuth missing | Enable Data API; add key; OAuth later for private/write |
-| Meta Ads | Campaign abstractions and metrics | REST client ready | Read-only account probe + mocks | No | No | MOCK_READY + NEEDS_AUTH | Meta app/token/ad account missing | Start with `ads_read`; do not grant/execute writes yet |
-| Google Ads | Metrics and campaign drafts | REST client ready | OAuth refresh + accessible-customer probe + mocks | No | No | MOCK_READY + NEEDS_AUTH | Developer token, OAuth, customer ID missing | Configure test/read access and run probe |
-| Website | Public metadata, form/webhook interface | REST client ready | URL probe + mock page/form data | No config | No | MOCK_READY + CONFIG_REQUIRED | Website URL/CMS unknown | Set `WEBSITE_URL`; choose CMS adapter later if needed |
+| Zoho CRM | Leads, contacts, accounts, deals, tasks | REST client ready | Read-only OAuth callback, refresh, probe, normalization | Web account + CRM org confirmed | No | MOCK_READY + NEEDS_AUTH | Zoho API Console requires owner MFA before app creation | Complete MFA; create local callback app; run read-only OAuth and probe |
+| Microsoft 365 | Mail metadata, calendar, files | REST client ready | PKCE callback, refresh, Graph probe, mail metadata normalization | Outlook/OneDrive session confirmed | No | MOCK_READY + NEEDS_AUTH | Entra portal requires Authenticator code; app registration not created | Complete MFA; register public client with delegated read scopes; run OAuth and probe |
+| Apollo | People/company search and enrichment | REST client ready | No-credit auth probe + cost metadata + mocks | Account evidence exists; current Apollo session logged out | No | MOCK_READY + NEEDS_AUTH | Login and scoped API key creation required | Sign in, create scoped key, store in Credential Manager, call `/auth/health` only |
+| LinkedIn | Page/account read and post drafts | REST client ready | OAuth/access-state adapter + mocks | Member + developer portal session confirmed | No | MOCK_READY + NEEDS_ACCESS | No developer app; company Page was not offered for association; legal acceptance is owner-only | Verify Page admin/association, accept terms, then create app and request minimal product access |
+| YouTube | Channel/video metadata and future analytics | REST client ready | Header-based API-key probe + mocks | Google Cloud project accessible | No | MOCK_READY + NEEDS_AUTH | YouTube Data API disabled; enabling accepts provider terms; key creation needs owner confirmation | Owner accepts API terms, then create a restricted key and run minimal probe |
+| Meta Ads | Campaign abstractions and metrics | REST client ready | Header-based read-only account probe + mocks | Meta Business session not authenticated | No | MOCK_READY + NEEDS_AUTH | Facebook/Business login, app, token, and ad account access missing | Owner signs in; then start with `ads_read` and no write scopes |
+| Google Ads | Metrics and campaign drafts | REST client ready | OAuth refresh + accessible-customer probe + mocks | Live Ads account/session confirmed; customer ID stored securely | No | MOCK_READY + NEEDS_AUTH | Developer token and OAuth client/refresh token missing | Create read-only API credentials after owner confirmation, then run accessible-customer probe |
+| Website | Public metadata, form/webhook interface | REST client ready | URL probe + canonical metadata normalization | URL stored in Windows Credential Manager | Yes | CONNECTED + LIVE_VERIFIED | CMS type/write API intentionally not configured | Keep read-only; choose CMS adapter only when a write workflow is approved |
 
 ## Capability truth table
 

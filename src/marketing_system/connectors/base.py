@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -10,7 +11,13 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings
 from ..constants import ConnectorState, Impact
+from ..credentials import read_credential
 from ..mock_data import connector_mock_records
+
+
+# httpx emits full request URLs at INFO; query strings can contain provider data.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 class Capability(BaseModel):
@@ -52,6 +59,8 @@ class BaseConnector(ABC):
 
     def env(self, name: str) -> str | None:
         value = os.getenv(name)
+        if not value:
+            value = read_credential(name)
         return value.strip() if value and value.strip() else None
 
     def configured(self) -> bool:

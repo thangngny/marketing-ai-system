@@ -23,7 +23,8 @@ class MetaAdsConnector(BaseConnector):
         response = self.request(
             "GET",
             f"https://graph.facebook.com/v23.0/act_{account}",
-            params={"fields": "id,name,account_status", "access_token": self.env("META_ACCESS_TOKEN")},
+            params={"fields": "id,name,account_status"},
+            headers={"Authorization": f"Bearer {self.env('META_ACCESS_TOKEN')}"},
             timeout=15.0,
         )
         return response.is_success, f"Meta ad-account read probe returned HTTP {response.status_code}."

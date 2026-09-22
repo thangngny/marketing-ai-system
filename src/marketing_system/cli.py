@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import shutil
@@ -10,7 +11,10 @@ from pathlib import Path
 
 from .config import PROJECT_ROOT, Settings
 from .constants import TestState
+from .credentials import available as credential_store_available
+from .credentials import credential_present, write_credential
 from .mcp_server import server
+from .oauth import authorize_m365, authorize_zoho
 from .orchestrator import MarketingOrchestrator
 from .routing import route_intent
 
@@ -98,7 +102,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     try:
         result = orchestrator.handle("Kiểm tra trạng thái toàn bộ hệ thống.", source_channel="doctor")
         checks.append(("Marketing Orchestrator", "OK", result.result_state))
-        checks.append(("MCP/Integration server", "OK", "5 typed tools registered"))
+        checks.append(("MCP/Integration server", "OK", "6 typed tools registered"))
     except Exception as exc:
         checks.append(("Marketing Orchestrator", "FAIL", type(exc).__name__))
         checks.append(("MCP/Integration server", "FAIL", type(exc).__name__))
@@ -152,6 +156,39 @@ def command_acceptance(_: argparse.Namespace) -> int:
     return 0 if all(state == TestState.PASS_MOCK for state in results.values()) else 1
 
 
+def command_credentials_status(_: argparse.Namespace) -> int:
+    names = sorted(
+        {
+            key
+            for connector in MarketingOrchestrator().registry._connectors.values()
+            for key in (*connector.required_env, *connector.optional_env)
+        }
+    )
+    print(f"OS credential store: {'AVAILABLE' if credential_store_available() else 'UNAVAILABLE'}")
+    for name in names:
+        env_present = bool(os.getenv(name))
+        vault_present = credential_present(name) if credential_store_available() else False
+        location = "PROCESS_ENV" if env_present else "WINDOWS_CREDENTIAL_MANAGER" if vault_present else "MISSING"
+        print(f"{name}: {location}")
+    return 0
+
+
+def command_credentials_set(args: argparse.Namespace) -> int:
+    value = getpass.getpass(f"Enter {args.name} (hidden): ")
+    if not value:
+        print("Credential was not stored: empty input.", file=sys.stderr)
+        return 2
+    write_credential(args.name, value)
+    print(f"{args.name}: stored in Windows Credential Manager (value not displayed)")
+    return 0
+
+
+def command_oauth(args: argparse.Namespace) -> int:
+    result = authorize_m365() if args.provider == "m365" else authorize_zoho()
+    print(f"{result['provider']}: {result['state']} (token value not displayed)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="marketing-system")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -174,6 +211,16 @@ def build_parser() -> argparse.ArgumentParser:
     handle.set_defaults(func=command_handle)
     acceptance = sub.add_parser("acceptance")
     acceptance.set_defaults(func=command_acceptance)
+    credentials = sub.add_parser("credentials")
+    credential_sub = credentials.add_subparsers(dest="credentials_command", required=True)
+    credentials_status = credential_sub.add_parser("status")
+    credentials_status.set_defaults(func=command_credentials_status)
+    credentials_set = credential_sub.add_parser("set")
+    credentials_set.add_argument("name")
+    credentials_set.set_defaults(func=command_credentials_set)
+    oauth = sub.add_parser("oauth")
+    oauth.add_argument("provider", choices=["m365", "zoho"])
+    oauth.set_defaults(func=command_oauth)
     return parser
 
 

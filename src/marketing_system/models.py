@@ -152,3 +152,11 @@ class OrchestratorResult(BaseModel):
     approval_required: bool = False
     side_effects: list[str] = Field(default_factory=list)
 
+
+class ReadonlySyncResult(BaseModel):
+    correlation_id: str | None = None
+    state: str
+    connector: str
+    resource: str
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    detail: str = ""

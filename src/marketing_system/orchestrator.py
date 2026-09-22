@@ -7,7 +7,7 @@ from .config import Settings
 from .connectors import ConnectorRegistry
 from .fixtures import mock_logistics_leads
 from .logging_utils import write_event
-from .models import OrchestratorResult
+from .models import OrchestratorResult, ReadonlySyncResult
 from .routing import route_intent
 from .safety import authorize
 from .storage import StagingStore
@@ -27,6 +27,55 @@ class MarketingOrchestrator:
             "safe_dry_run": self.settings.safe_dry_run,
             "connectors": [report.model_dump(mode="json") for report in reports],
         }
+
+    def sync_readonly(self, connector_name: str, resource: str, limit: int = 25) -> ReadonlySyncResult:
+        """Run a verified read and stage canonical records without external writes."""
+        correlation_id = str(uuid4())
+        if self.settings.environment.value == "mock":
+            return ReadonlySyncResult(
+                correlation_id=correlation_id,
+                state="BLOCKED_MOCK_MODE",
+                connector=connector_name,
+                resource=resource,
+                detail="Live reads are disabled while MARKETING_ENVIRONMENT=mock.",
+            )
+        connector = self.registry.get(connector_name)
+        report = connector.report(live_probe=True)
+        if report.live_state.value != "CONNECTED":
+            return ReadonlySyncResult(
+                correlation_id=correlation_id,
+                state="BLOCKED_NOT_CONNECTED",
+                connector=connector_name,
+                resource=resource,
+                detail=report.detail,
+            )
+        records = connector.read(resource, limit=limit, correlation_id=correlation_id)
+        canonical = []
+        for record in records:
+            if not hasattr(record, "model_dump"):
+                raise TypeError("Live connector returned a non-canonical record")
+            self.store.upsert(record)
+            canonical.append(record.model_dump(mode="json"))
+        write_event(
+            self.settings.log_dir,
+            correlation_id=correlation_id,
+            source_channel="mcp",
+            orchestrator="marketing_orchestrator",
+            tool="marketing_sync_readonly",
+            connector=connector_name,
+            resource=resource,
+            mode=self.settings.environment.value,
+            result="LIVE_VERIFIED_READ",
+            record_count=len(canonical),
+        )
+        return ReadonlySyncResult(
+            correlation_id=correlation_id,
+            state="LIVE_VERIFIED_READ",
+            connector=connector_name,
+            resource=resource,
+            records=canonical,
+            detail=f"Staged {len(canonical)} normalized record(s); no external writes were performed.",
+        )
 
     def handle(self, text: str, source_channel: str = "local") -> OrchestratorResult:
         started = time.perf_counter()
@@ -176,4 +225,3 @@ class MarketingOrchestrator:
             "campaign": "meta_ads/google_ads",
             "content": "linkedin",
         }.get(intent)
-

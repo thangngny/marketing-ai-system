@@ -2,7 +2,7 @@
 
 ## Current state
 
-The native Buzz → Hermes `marketing` profile path is live. Business integrations remain deterministic mock adapters under `SAFE_DRY_RUN`.
+The native Buzz → Hermes `marketing` profile path is live. `SAFE_DRY_RUN` remains enabled. The public website connector is live-verified; account-backed integrations remain gated until their provider OAuth/MFA steps complete.
 
 - Bot public identity: `8f006f396a54839e0cc320ee2a3b48226ef2c34039fe6f1754e6b7d0e4112cf1`
 - Community relay: `https://phamgianam.communities.buzz.xyz`
@@ -34,6 +34,24 @@ The gateway starts automatically at user login. Manual lifecycle commands are id
 
 `doctor.ps1` verifies the marketing provider configuration and current native Buzz gateway state. `smoke-test.ps1` is local/mock-only; live relay evidence is recorded in `TEST_REPORT.md`.
 
+## Phase 2 credentials and OAuth
+
+Connector secrets are stored in Windows Credential Manager and are never passed as command-line arguments:
+
+```powershell
+uv run marketing-system credentials status
+uv run marketing-system credentials set NAME
+```
+
+The `set` command uses a hidden prompt. After provider app registration, the supported OAuth flows capture the callback locally and store only the refresh token in Credential Manager:
+
+```powershell
+uv run marketing-system oauth zoho
+uv run marketing-system oauth m365
+```
+
+Read-only live ingestion is exposed to Hermes through `marketing_sync_readonly`. It is refused in `mock`, live-verifies the connector first, normalizes provider records, and writes only to SQLite staging.
+
 ## Autostart
 
 Installed through Hermes' Windows user-level Startup-folder fallback because Scheduled Task creation requested UAC and no elevation was granted.
@@ -53,7 +71,7 @@ The startup item contains no private key or OAuth token. Hermes reads the restri
 
 ## Safety
 
-- Keep `MARKETING_ENVIRONMENT=mock` and `MARKETING_SAFE_DRY_RUN=true` until Phase 2 is explicitly authorized.
+- Keep the gateway in `MARKETING_ENVIRONMENT=mock` and `MARKETING_SAFE_DRY_RUN=true` while OAuth onboarding is incomplete. Read-only validation may use an isolated production-scoped process.
 - `READ` and local `DRAFT` work are allowed.
 - `WRITE` requires human approval.
 - Paid ads, public publishing, outreach, email send, permission changes, and production mutations remain blocked.

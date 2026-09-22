@@ -57,3 +57,16 @@ The leads correlation has exactly three rows in `canonical_records`, all in the 
 - Money spent: 0.
 - Live CRM records created/updated/deleted: 0.
 - Live business connector probes: 0.
+
+## Phase 2 re-verification — 2026-09-22
+
+- `PASS`: 38 pytest tests; 8 live-account tests skipped pending OAuth/API credentials.
+- `PASS`: Hermes `marketing` profile provider returned the exact expected response using OpenAI Codex OAuth / `gpt-5.6-sol`.
+- `PASS`: the live Buzz relay returned 26 recent events; all seven cited Phase 1 reply event IDs were present and matched their expected markers.
+- `PASS`: controlled Hermes gateway stop/start completed cleanly; `doctor.ps1` then reported `Hermes - Buzz: OK - gateway live`.
+- `PASS`: website `https://minhvanlogistics.com` returned HTTP 200 through the connector and was classified `CONNECTED` only after the live probe.
+- `PASS`: one non-synthetic website `SourceReference` was normalized and staged in the `production` namespace. Existing synthetic leads remain isolated in `mock`.
+- `PASS`: connector credentials now resolve from Windows Credential Manager; no business secret was added to Git, SQLite, logs, screenshots, or command-line arguments.
+- `PASS`: Meta and YouTube probes were hardened so access tokens/API keys are not placed in query strings, and INFO-level HTTP request logging is suppressed.
+- `BLOCKED_OWNER_MFA`: Zoho API Console re-verification and Microsoft Entra portal sign-in.
+- `BLOCKED_OWNER_TERMS/ACCESS`: YouTube API enablement terms and LinkedIn Page/app association.

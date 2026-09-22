@@ -13,9 +13,22 @@ def test_mcp_tools_are_discoverable_and_callable():
             names = {tool.name for tool in listed.tools}
             assert "marketing_handle_request" in names
             assert "marketing_system_status" in names
+            assert "marketing_sync_readonly" in names
             result = await client.call_tool("marketing_route_intent", {"text": "Viết bài LinkedIn"})
             assert result.is_error is False
             assert result.structured_content["agents"] == ["04_content"]
 
     asyncio.run(run())
 
+
+def test_readonly_sync_is_blocked_in_mock_mode():
+    async def run():
+        async with Client(InMemoryTransport(server)) as client:
+            result = await client.call_tool(
+                "marketing_sync_readonly",
+                {"connector": "website", "resource": "metadata", "limit": 1},
+            )
+            assert result.is_error is False
+            assert result.structured_content["state"] == "BLOCKED_MOCK_MODE"
+
+    asyncio.run(run())

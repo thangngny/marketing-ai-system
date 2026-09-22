@@ -1,6 +1,20 @@
 # Tài khoản và credential cần chuẩn bị
 
-Không điền secret vào Git. Tạo `C:\Users\Admin\marketing-ai-system\.env.local` từ `.env.example`, chỉ điền giá trị trên máy này, rồi giữ file đó ngoài Git. Lệnh kiểm tra chung:
+Không điền secret vào Git hoặc file dự án. Phase 2 lưu connector secret trong Windows Credential Manager bằng trường nhập ẩn:
+
+```powershell
+uv run marketing-system credentials set TEN_BIEN
+uv run marketing-system credentials status
+```
+
+Sau khi tạo app Zoho/Microsoft, OAuth callback cục bộ sẽ lưu refresh token trực tiếp, không in token hoặc authorization code:
+
+```powershell
+uv run marketing-system oauth zoho
+uv run marketing-system oauth m365
+```
+
+Lệnh kiểm tra chung:
 
 ```powershell
 cd C:\Users\Admin\marketing-ai-system
@@ -39,7 +53,7 @@ Script hỏi private key bằng trường nhập ẩn; không in key ra màn hì
 - Tài khoản: Zoho CRM organization (production hoặc sandbox/developer đúng môi trường cần dùng).
 - Tạo: server-based OAuth client trong Zoho API Console.
 - Quyền ban đầu: chỉ READ cho Leads, Contacts, Accounts, Deals, Tasks; thêm CREATE/UPDATE sau khi quy trình duyệt đã được chấp nhận. Không cấp DELETE trong Phase 1.
-- Điền: `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, đúng accounts/API domain theo data center.
+- Lưu `ZOHO_CLIENT_ID` và `ZOHO_CLIENT_SECRET` bằng `credentials set`; `oauth zoho` tự lưu `ZOHO_REFRESH_TOKEN` và API domain. Dùng redirect URI `http://localhost:53682`.
 - Kiểm tra không phá dữ liệu:
 
 ```powershell
@@ -53,7 +67,7 @@ Probe chỉ đổi refresh token thành access token rồi đọc organization; 
 - Tài khoản: Microsoft 365 tenant và user được phép đọc đúng mailbox/calendar/files.
 - Tạo: app registration trong Microsoft Entra ID; dùng delegated OAuth.
 - Quyền khởi đầu: `User.Read`, `Mail.Read`, `Calendars.Read`, `Files.Read`, `Sites.Read.All` chỉ khi thực sự cần SharePoint. `Mail.ReadWrite` chỉ cần nếu tạo draft trên mailbox. Không xin `Mail.Send` trong Phase 1.
-- Điền: `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` nếu app loại confidential, và access token OAuth vào `MS_GRAPH_ACCESS_TOKEN` cho lần kiểm tra.
+- Lưu `MS_TENANT_ID` và `MS_CLIENT_ID` bằng `credentials set`; đăng ký public desktop client với redirect URI `http://localhost`. `oauth m365` dùng PKCE và tự lưu refresh token; không cần client secret cho public client.
 - Kiểm tra:
 
 ```powershell

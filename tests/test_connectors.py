@@ -4,6 +4,7 @@ from marketing_system.constants import ConnectorState, Environment
 
 
 def test_every_connector_is_mock_ready_without_credentials(monkeypatch, tmp_path):
+    monkeypatch.setattr("marketing_system.connectors.base.read_credential", lambda _: None)
     for name in list(__import__("os").environ):
         if name.startswith(("ZOHO_", "MS_", "APOLLO_", "LINKEDIN_", "YOUTUBE_", "META_", "GOOGLE_ADS_", "WEBSITE_")):
             monkeypatch.delenv(name, raising=False)

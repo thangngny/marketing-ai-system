@@ -4,7 +4,7 @@ from mcp.server.mcpserver import MCPServer
 
 from .config import Settings
 from .fixtures import mock_logistics_leads
-from .models import OrchestratorResult, RouteDecision
+from .models import OrchestratorResult, ReadonlySyncResult, RouteDecision
 from .orchestrator import MarketingOrchestrator
 from .routing import route_intent
 from .safety import SafetyDecision, authorize
@@ -60,6 +60,18 @@ def marketing_request_execution(action: str, explicit_approval: bool = False) ->
         settings.safe_dry_run,
         explicit_approval=explicit_approval,
     )
+
+
+@server.tool()
+def marketing_sync_readonly(connector: str, resource: str, limit: int = 25) -> ReadonlySyncResult:
+    """Live-verify a connector, read bounded provider data, normalize it, and stage it locally."""
+    if connector not in {"zoho", "m365", "website"}:
+        return ReadonlySyncResult(
+            state="UNSUPPORTED_CONNECTOR",
+            connector=connector,
+            resource=resource,
+        )
+    return orchestrator.sync_readonly(connector, resource, limit=min(max(limit, 1), 100))
 
 
 def main() -> None:

@@ -18,7 +18,7 @@ Marketing Orchestrator
   ▼
 Marketing MCP server (stdio, project-local Python environment)
   ├─ connector registry and status
-  ├─ canonical model validation
+  ├─ canonical model validation and read-only live normalization
   ├─ SQLite staging store
   ├─ structured audit log
   └─ mock/live adapter selection
@@ -44,7 +44,7 @@ The integration service does not listen on a TCP port in the default deployment.
 | Specialist skills | Marketing methods and output expectations | Direct API credentials |
 | MCP integration server | Typed tools, safety policy, adapters, canonical mapping | Buzz transport or Hermes sessions |
 | SQLite staging | Local canonical mock/staging records | Production system-of-record authority |
-| Zoho (future) | CRM source of truth after live verification | Mock/synthetic records |
+| Zoho (pending OAuth) | CRM source of truth only after OAuth, live probe, mapping validation, and owner sign-off | Mock/synthetic records |
 
 ## Specialist routing
 
@@ -97,7 +97,7 @@ Phase 1 implements no paid-campaign launch, budget mutation, email send, public 
 
 ## Secrets
 
-Secrets live only in the isolated Hermes profile's restricted `.env` or an operator-selected secret manager. Project `.env` files are ignored by Git. Logs redact keys, tokens, authorization headers, cookies, and OAuth codes.
+Business connector secrets live in the current user's Windows Credential Manager under `BuzzMarketing/`. Hermes/Buzz identity material remains in the isolated Hermes profile's restricted `.env`. Project `.env` files are ignored by Git and are not used for connector tokens. Logs redact keys, tokens, authorization headers, cookies, and OAuth codes; provider secrets are sent in headers or request bodies rather than query strings.
 
 ## Operational shape
 
@@ -108,4 +108,3 @@ Secrets live only in the isolated Hermes profile's restricted `.env` or an opera
 - `scripts/smoke-test.ps1`: unit/contract/mock/routing/security tests and optional Buzz checks.
 
 Linux `.sh` wrappers are portability aids, not the active service mechanism on this audited host.
-

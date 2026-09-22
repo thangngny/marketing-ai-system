@@ -21,7 +21,8 @@ class YouTubeConnector(BaseConnector):
         response = self.request(
             "GET",
             "https://www.googleapis.com/youtube/v3/videos",
-            params={"part": "id", "chart": "mostPopular", "maxResults": 1, "key": self.env("YOUTUBE_API_KEY")},
+            params={"part": "id", "chart": "mostPopular", "maxResults": 1},
+            headers={"x-goog-api-key": self.env("YOUTUBE_API_KEY") or ""},
             timeout=15.0,
         )
         return response.is_success, f"YouTube read-only probe returned HTTP {response.status_code} and consumed quota."

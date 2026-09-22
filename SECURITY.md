@@ -22,11 +22,13 @@ The code-level `authorize()` gate is authoritative. A prompt asking to bypass it
 
 ## Secret storage
 
-- Project credential file: `.env.local`, ignored by Git.
+- Business-service secrets: Windows Credential Manager under the `BuzzMarketing/` namespace.
+- `.env.local`, when used, is limited to non-secret local configuration and remains ignored by Git.
 - Hermes/Buzz identity: isolated profile `.env` at `%LOCALAPPDATA%\hermes\profiles\marketing\.env`.
 - Never place secrets in source, docs, fixtures, screenshots, logs, command-line arguments, or Buzz messages.
 - Structured logging recursively redacts secret/token/password/private-key/authorization/cookie fields.
 - Use a dedicated agent Nostr key; never reuse the human owner's key.
+- `marketing-system credentials set NAME` reads the value through a hidden prompt; the value is never an argument or printed output.
 
 ## Data separation
 
@@ -57,4 +59,3 @@ The code-level `authorize()` gate is authoritative. A prompt asking to bypass it
 2. Revoke affected provider tokens and the dedicated Buzz agent key.
 3. Inspect `%LOCALAPPDATA%\hermes\profiles\marketing\logs` and project `logs\marketing.jsonl` for correlation ids; do not paste raw logs into public channels.
 4. Restore Hermes from snapshot `20260919-104853-pre-marketing-system` if profile changes must be rolled back.
-

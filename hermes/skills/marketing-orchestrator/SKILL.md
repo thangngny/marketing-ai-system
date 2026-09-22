@@ -22,7 +22,7 @@ Use for every Buzz marketing request and every system-status question.
 
 ## Prerequisites
 
-The `local-ai-marketing-system` MCP server must expose `marketing_handle_request` and `marketing_system_status`.
+The `local-ai-marketing-system` MCP server must expose `marketing_handle_request`, `marketing_system_status`, and `marketing_sync_readonly`.
 
 ## How to Run
 
@@ -42,6 +42,7 @@ Call `marketing_handle_request` with the user's complete text and `source_channe
 2. Use only agents listed in the returned `agents` field.
 3. Preserve `MOCK`, approval, and connector-state labels.
 4. Return the tool's coherent `response`; add context only when the user asked for it.
+5. Use `marketing_sync_readonly` only for explicitly requested live reads after the connector reports `CONNECTED`; never use it in mock mode.
 
 ## Pitfalls
 
@@ -52,4 +53,3 @@ Call `marketing_handle_request` with the user's complete text and `source_channe
 ## Verification
 
 The answer includes a correlation id when diagnosing, identifies the selected agents when relevant, and reports zero unapproved side effects.
-
