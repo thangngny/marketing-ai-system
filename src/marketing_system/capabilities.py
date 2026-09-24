@@ -33,9 +33,11 @@ KNOWN_BLOCKERS: dict[str, tuple[S, str]] = {
     "zoho": (S.NEEDS_MFA, "Zoho API Console needs owner MFA to create the OAuth client."),
     "m365": (S.NEEDS_MFA, "Entra app registration needs owner sign-in with Authenticator."),
     "apollo": (S.NOT_CONFIGURED, "Owner must sign in to Apollo and create a scoped API key."),
-    "linkedin": (S.NEEDS_API_ACCESS, "LinkedIn developer app + Page association + product review."),
+    "linkedin": (S.NEEDS_ADMIN_APPROVAL, "App 'Buzz Marketing Hub' created and bound to the Page; waiting for a "
+                "Page Admin to approve the app-Page verification link before Community Management API can be requested."),
     "meta_ads": (S.NOT_CONFIGURED, "Meta Business login, app, ads_read token and ad account access missing."),
-    "google_ads": (S.NEEDS_API_ACCESS, "Google Ads developer token (Google-reviewed) + OAuth client missing."),
+    "google_ads": (S.NEEDS_ADMIN_APPROVAL, "Account 150-914-5225 is a standard Ads account, not a Manager (MCC); "
+                  "API Center refuses developer-token applications from it. Needs a new Manager account linked to it."),
 }
 
 PUBLISH_BLOCKERS: dict[str, S] = {
