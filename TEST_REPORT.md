@@ -37,7 +37,7 @@ Earlier reports (Phase 1/2, 2026-09-19/22) are in git history (`git show pre-run
 | `prospecting.search_companies` | NOT_CONFIGURED | Apollo key |
 | `email.get_unread_count` | NEEDS_MFA | Entra |
 | `ads.get_campaign_performance` | NOT_CONFIGURED | Meta |
-| North Star in production | BLOCKED (step 1) | `wf-39183a49b541`: Apollo NOT_CONFIGURED — nothing fabricated |
+| North Star in production | PARTIAL → WAITING_APPROVAL | `wf-e974988ea873`: Apollo LIVE → Zoho LIVE dedupe → code scoring → 3 drafts by Hermes (language-only) → owner gate `MV-1CF5A5`. Outlook draft step will block on M365 (NEEDS_MFA). Earlier run exposed a recursion bug (see commit af934fe); ≈6 Apollo credits used in total, 0 external writes |
 
 ## Buzz E2E
 
