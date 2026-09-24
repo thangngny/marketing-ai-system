@@ -98,7 +98,8 @@ async def _call(url: str, tool: str, arguments: dict[str, Any], interactive: boo
     async with create_mcp_http_client(auth=provider) as http:
         async with streamable_http_client(url, http_client=http) as streams:
             read, write = streams[0], streams[1]
-            async with ClientSession(read, write, read_timeout_seconds=60) as session:
+            # Interactive consent happens inside the first request, so give the human up to 10 minutes.
+            async with ClientSession(read, write, read_timeout_seconds=600 if interactive else 60) as session:
                 await session.initialize()
                 result = await session.call_tool(tool, arguments)
     if result.is_error:
