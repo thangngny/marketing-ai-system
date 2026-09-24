@@ -63,9 +63,14 @@ def connector_status(connector, settings: Settings, store=None, live_probe: bool
                                capabilities={d: str(state) for d in DIMENSIONS}, detail=detail)
 
     evidence = store.last_live_success(name) if store is not None else None
+    latest = store.last_live_state(name) if store is not None else None
     probed_ok = report.live_tested and report.live_state == ConnectorState.CONNECTED
     if report.live_state == ConnectorState.ERROR:
         auth = S.ERROR
+    elif latest and latest[0] not in ("OK", "DUPLICATE") and not probed_ok:
+        # The most recent real call failed: last week's success is not today's truth.
+        auth = S.AUTHENTICATING if latest[0] == "NEEDS_AUTH" else S.DEGRADED
+        evidence = None
     elif probed_ok or evidence:
         auth = S.LIVE_READ
     else:
@@ -78,5 +83,8 @@ def connector_status(connector, settings: Settings, store=None, live_probe: bool
             caps[dim] = str(S.LIVE_READ if auth is S.LIVE_READ else auth)
     caps["DRAFT"] = str(S.NOT_CONFIGURED if "DRAFT" not in supported else S.DEGRADED)
     caps["PUBLISH"] = str(PUBLISH_BLOCKERS.get(name, S.NOT_CONFIGURED))
-    detail = f"last live read {evidence}" if evidence else ("live probe OK" if probed_ok else "credentials present; no live evidence yet")
+    if latest and evidence is None and not probed_ok and latest[0] not in ("OK", "DUPLICATE"):
+        detail = f"latest live call {latest[0]} {latest[1]}".strip()
+    else:
+        detail = f"last live read {evidence}" if evidence else ("live probe OK" if probed_ok else "credentials present; no live evidence yet")
     return ConnectorStatus(connector=name, environment=settings.environment.value, capabilities=caps, detail=detail)

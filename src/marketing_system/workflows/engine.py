@@ -7,6 +7,7 @@ workflow after a crash or restart. Transitions are validated against a table.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 from uuid import uuid4
@@ -144,6 +145,11 @@ class WorkflowEngine:
         self.approvals = approvals
         self.runtime = runtime
         self.definitions = definitions
+        # When True (MCP server), advance/resume run on a background thread and return immediately;
+        # state is durable, so callers poll with status(). Tests and CLI keep synchronous behaviour.
+        self.background = False
+        self._active: set[str] = set()
+        self._active_lock = threading.Lock()
 
     # ------------------------------------------------------------------ API
     def start(self, workflow_type: str, request: str, *, params: dict[str, Any] | None = None,
@@ -158,7 +164,32 @@ class WorkflowEngine:
             "specialists": definition.specialists, "state": NEW,
         })
         self._move(workflow_id, NEW, PLANNED, "plan: " + ", ".join(s.name for s in definition.steps))
-        return self.advance(workflow_id) if run else self.status(workflow_id)
+        if not run:
+            return self.status(workflow_id)
+        return self._dispatch(self.advance, workflow_id)
+
+    def _dispatch(self, fn, workflow_id: str) -> dict[str, Any]:
+        if not self.background:
+            return fn(workflow_id)
+        with self._active_lock:
+            if workflow_id in self._active:
+                return self.status(workflow_id)  # already being advanced in this process
+            self._active.add(workflow_id)
+
+        def run() -> None:
+            try:
+                fn(workflow_id)
+            except Exception:  # state is persisted; a failed thread leaves the workflow resumable
+                pass
+            finally:
+                with self._active_lock:
+                    self._active.discard(workflow_id)
+
+        threading.Thread(target=run, name=f"workflow-{workflow_id}", daemon=True).start()
+        return self.status(workflow_id)
+
+    def resume_async(self, workflow_id: str) -> dict[str, Any]:
+        return self._dispatch(self.resume, workflow_id)
 
     def advance(self, workflow_id: str) -> dict[str, Any]:
         wf = self._require(workflow_id)

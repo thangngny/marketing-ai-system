@@ -25,6 +25,7 @@ from .telemetry import new_correlation_id
 from .tools.hub import ToolContext, ToolSpec
 
 platform = build_platform()
+platform.engine.background = True  # long workflows never block an MCP call; poll workflow_status
 settings = platform.settings
 orchestrator = MarketingOrchestrator(platform=platform)
 server = MCPServer(
@@ -95,8 +96,8 @@ def workflow_status(workflow_id: str) -> dict[str, Any]:
 
 @server.tool()
 def workflow_resume(workflow_id: str) -> dict[str, Any]:
-    """Continue a workflow. Resumes only if the owner's signed approval is found; otherwise stays waiting."""
-    return platform.engine.resume(workflow_id)
+    """Continue a workflow in the background. Resumes only with the owner's signed approval; poll workflow_status."""
+    return platform.engine.resume_async(workflow_id)
 
 
 @server.tool()

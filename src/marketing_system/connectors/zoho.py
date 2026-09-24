@@ -31,7 +31,20 @@ class ZohoConnector(BaseConnector):
 
         if zoho_mcp.endpoint() and zoho_mcp.has_tokens():
             return "mcp"
+        from . import zoho_delegate
+
+        if zoho_delegate.available():
+            return "delegate"
         return None
+
+    def _mcp_call(self, tool: str, arguments: dict[str, Any]) -> Any:
+        if self.transport() == "delegate":
+            from . import zoho_delegate
+
+            return zoho_delegate.call_tool(tool, arguments)
+        from . import zoho_mcp
+
+        return zoho_mcp.call_tool(tool, arguments)
 
     def configured(self) -> bool:
         return self.transport() is not None
@@ -40,6 +53,8 @@ class ZohoConnector(BaseConnector):
         present, missing = super().credential_presence()
         if self.transport() == "mcp":
             return [*present, "ZOHO_MCP_URL", "ZOHO_MCP_TOKENS"], []
+        if self.transport() == "delegate":
+            return [*present, "CLAUDE_CODE_ZOHO_AUTH"], []
         return present, missing
 
     @property
@@ -76,12 +91,10 @@ class ZohoConnector(BaseConnector):
         return self._cached_access_context
 
     def probe_live(self) -> tuple[bool, str]:
-        if self.transport() == "mcp":
-            from . import zoho_mcp
-
-            body = zoho_mcp.call_tool("ZohoCRM_getRecordCount", {"path_variables": {"moduleApiName": "Leads"}})
+        if self.transport() in ("mcp", "delegate"):
+            body = self._mcp_call("ZohoCRM_getRecordCount", {"path_variables": {"moduleApiName": "Leads"}})
             ok = isinstance(body, dict) and body.get("status") == "success"
-            return ok, "Zoho hosted-MCP count probe " + ("succeeded." if ok else "failed.")
+            return ok, f"Zoho {self.transport()} count probe " + ("succeeded." if ok else "failed.")
         access_token, api_domain = self._access_context()
         probe = self.request(
             "GET",
@@ -99,14 +112,15 @@ class ZohoConnector(BaseConnector):
         module, fields = self._resources[resource]
         limit = min(max(int(kwargs.get("limit", 25)), 1), 200)
         correlation_id = str(kwargs.get("correlation_id") or "zoho-read")
-        if self.transport() == "mcp":
-            from . import zoho_mcp
-
-            body = zoho_mcp.call_tool("ZohoCRM_getRecords", {
-                "path_variables": {"moduleApiName": module},
+        if self.transport() in ("mcp", "delegate"):
+            body = self._mcp_call("ZohoCRM_getRecords", {
+                "path_variables": {"module": module},
                 "query_params": {"fields": fields.replace("id,", ""), "per_page": limit},
             })
-            rows = body.get("data", []) if isinstance(body, dict) else []
+            if isinstance(body, dict) and body.get("status") == "failure":
+                raise RuntimeError(f"Zoho error: {str(body.get('data'))[:200]}")
+            data = body.get("data", []) if isinstance(body, dict) else []
+            rows = data.get("data", []) if isinstance(data, dict) else data
             return [normalize_zoho_record(module, record, environment=self.settings.environment,
                                           correlation_id=correlation_id) for record in rows]
         access_token, api_domain = self._access_context()

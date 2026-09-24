@@ -165,7 +165,14 @@ def _crm_list(resource: str):
             if resource == "accounts":
                 return mock_crm_accounts()[: args.limit]
             return [r for r in connector.mock_search(resource, limit=args.limit)]
-        return _dump(connector.read(resource, limit=args.limit, correlation_id=rt.ctx.correlation_id))
+        from ..connectors.zoho_delegate import ZohoDelegateError, ZohoSessionExpired
+
+        try:
+            return _dump(connector.read(resource, limit=args.limit, correlation_id=rt.ctx.correlation_id))
+        except ZohoSessionExpired as exc:
+            raise ToolUnavailable("NEEDS_AUTH", str(exc)) from None
+        except ZohoDelegateError as exc:
+            raise ToolUnavailable("DEGRADED", f"Zoho via Claude Code failed: {exc}") from None
 
     return handler
 

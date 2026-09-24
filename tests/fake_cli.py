@@ -19,7 +19,7 @@ if mode == "sleep":
 if flavor == "hermes":
     prompt = args[args.index("-z") + 1]
 elif flavor == "claude":
-    prompt = args[args.index("-p") + 1]
+    prompt = sys.stdin.read()
 else:
     prompt = args[-1]
 

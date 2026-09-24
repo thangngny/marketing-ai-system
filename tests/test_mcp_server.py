@@ -51,12 +51,23 @@ def test_write_tool_over_mcp_becomes_waiting_workflow():
     async def run():
         async with Client(InMemoryTransport(server)) as client:
             result = await client.call_tool("crm_create_task", {"subject": "Gọi lại", "related_company": "ACME"})
-            assert result.structured_content["state"] == "WAITING_APPROVAL"
-            assert result.structured_content["approval"]["code"].startswith("MV-")
-            resumed = await client.call_tool("workflow_resume", {"workflow_id": result.structured_content["workflow_id"]})
-            assert resumed.structured_content["state"] == "WAITING_APPROVAL"  # no owner signature → no progress
+            wf_id = result.structured_content["workflow_id"]
+            status = await _poll(client, wf_id, "WAITING_APPROVAL")  # runs in the background now
+            assert status["approval"]["code"].startswith("MV-")
+            await client.call_tool("workflow_resume", {"workflow_id": wf_id})
+            status = await _poll(client, wf_id, "WAITING_APPROVAL")
+            assert status["state"] == "WAITING_APPROVAL"  # no owner signature → no progress
 
     asyncio.run(run())
+
+
+async def _poll(client, workflow_id, want, tries=50):
+    for _ in range(tries):
+        status = (await client.call_tool("workflow_status", {"workflow_id": workflow_id})).structured_content
+        if status["state"] == want:
+            return status
+        await asyncio.sleep(0.1)
+    return status
 
 
 def test_readonly_sync_is_blocked_in_mock_mode():

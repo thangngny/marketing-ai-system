@@ -28,7 +28,7 @@ MCP server `marketing-system` exposes `marketing_handle_request`, `marketing_sys
 
 1. Call `marketing_handle_request` with the full user text, `source_channel="buzz"`, and when known the Buzz `buzz_event_id`, `channel_id` and sender `user_id`.
 2. Read `result_state` and `data`:
-   - **Workflow** (`data.workflow`): relay the step list. If `WAITING_APPROVAL`, show the summary and tell the owner to reply `DUYET <code>` or `TUCHOI <code>`. Later, call `workflow_resume` when asked to continue.
+   - **Workflow** (`data.workflow`): it runs in the background; call `workflow_status` until it is `WAITING_APPROVAL`, `DONE` or `BLOCKED`, then relay the step list. If `WAITING_APPROVAL`, show the summary and tell the owner to reply `DUYET <code>` or `TUCHOI <code>`. Later, call `workflow_resume` when asked to continue.
    - **Specialist brief** (`data.specialist_brief`): do the work yourself as those specialists, using only the tools listed for each. Save drafts with `content_save_draft`. Keep every `BẢN NHÁP` / `KHÔNG KHỞI CHẠY` label.
    - **Fast result** (status, leads, KPI snapshot): answer from the returned data only.
 3. Never present `MOCK` data as real, never convert `NEEDS_*` / `NOT_CONFIGURED` into "connected".

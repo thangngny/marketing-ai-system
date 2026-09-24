@@ -146,3 +146,26 @@ def test_hub_records_spans_and_ledger(env):
     assert platform.store.tool_calls(correlation_id="corr-span")[0]["tool"] == "analytics.snapshot"
     log = (platform.settings.log_dir / "marketing.jsonl").read_text(encoding="utf-8")
     assert '"trace_id": "corr-span"' in log and '"name": "tool.analytics.snapshot"' in log
+
+
+def test_background_mode_returns_immediately_and_finishes(env):
+    import time
+
+    make, owner_says = env
+    platform = make()
+    platform.engine.background = True
+    first = start(platform)
+    assert first["state"] in {"PLANNED", "RUNNING", "WAITING_APPROVAL"}
+    for _ in range(100):
+        status = platform.engine.status(first["workflow_id"])
+        if status["state"] == "WAITING_APPROVAL":
+            break
+        time.sleep(0.05)
+    assert status["state"] == "WAITING_APPROVAL"
+    owner_says(f"DUYET {status['approval']['code']}")
+    platform.engine.resume_async(first["workflow_id"])
+    for _ in range(100):
+        if platform.engine.status(first["workflow_id"])["state"] == "DONE":
+            break
+        time.sleep(0.05)
+    assert platform.engine.status(first["workflow_id"])["state"] == "DONE"

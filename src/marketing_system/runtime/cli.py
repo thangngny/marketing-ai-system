@@ -27,6 +27,10 @@ class CliRuntime(AgentRuntime):
     @abstractmethod
     def build_args(self, request: ConversationInput) -> list[str]: ...
 
+    def stdin_prompt(self, request: ConversationInput) -> str | None:
+        """Return the prompt to send on stdin instead of argv (for .cmd shims), or None."""
+        return None
+
     def parse(self, stdout: str) -> tuple[str, str | None]:
         """Return (text, session_id)."""
         return stdout.strip(), None
@@ -43,14 +47,16 @@ class CliRuntime(AgentRuntime):
         env = {**os.environ, "MARKETING_CORRELATION_ID": request.correlation_id}
         if request.workflow_id:
             env["MARKETING_WORKFLOW_ID"] = request.workflow_id
+        piped = self.stdin_prompt(request)
+        io = {"input": piped.encode("utf-8")} if piped is not None else {"stdin": subprocess.DEVNULL}
         try:
             completed = subprocess.run(
                 [*exe, *self.build_args(request)],
                 capture_output=True,
                 timeout=self.timeout,
                 env=env,
-                stdin=subprocess.DEVNULL,
                 check=False,
+                **io,
             )
         except subprocess.TimeoutExpired:
             return self._fail(request, started, "TIMEOUT")

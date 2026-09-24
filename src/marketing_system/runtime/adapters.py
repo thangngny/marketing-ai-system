@@ -80,8 +80,11 @@ class ClaudeRuntime(CliRuntime):
         found = which("claude.cmd", "claude.exe", "claude")
         return [found] if found else None
 
+    def stdin_prompt(self, request: ConversationInput) -> str | None:
+        return request.text  # claude.cmd runs through cmd.exe, which breaks multi-line argv
+
     def build_args(self, request: ConversationInput) -> list[str]:
-        args = ["-p", request.text, "--output-format", "json"]
+        args = ["-p", "--output-format", "json"]
         if request.session_id:
             args += ["--resume", request.session_id]
         if self.model:

@@ -34,6 +34,8 @@ def _no_os_credentials(request, monkeypatch):
     if LIVE and request.node.get_closest_marker("live"):
         return
     monkeypatch.setattr("marketing_system.connectors.base.read_credential", lambda _name: None)
+    monkeypatch.setattr("marketing_system.connectors.zoho_mcp.read_credential", lambda _name: None)
+    monkeypatch.setattr("marketing_system.connectors.zoho_delegate.available", lambda: False)
 
 
 def pytest_configure(config):

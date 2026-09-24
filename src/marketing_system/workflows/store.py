@@ -268,6 +268,14 @@ class WorkflowStore:
             ).fetchone()
         return row["at"] if row and row["at"] else None
 
+    def last_live_state(self, connector: str) -> tuple[str, str] | None:
+        """(state, error_code) of the most recent non-mock READ call for a connector."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT state, error_code FROM tool_calls WHERE connector=? AND impact='READ' AND environment!='mock' "
+                "ORDER BY call_id DESC LIMIT 1", (connector,)).fetchone()
+        return (row["state"], row["error_code"] or "") if row else None
+
     def tool_calls(self, workflow_id: str | None = None, correlation_id: str | None = None) -> list[dict[str, Any]]:
         sql, params = "SELECT * FROM tool_calls WHERE 1=1", []
         if workflow_id:
