@@ -4,6 +4,7 @@ import base64
 import hashlib
 import os
 import secrets
+import time
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -75,7 +76,14 @@ def _capture_callback(auth_url: str, *, port: int = 0, timeout: int = 300) -> tu
     redirect_uri = f"http://localhost:{actual_port}"
     url = auth_url.replace("REDIRECT_URI_PLACEHOLDER", urllib.parse.quote(redirect_uri, safe=""))
     webbrowser.open(url, new=2)
-    server.handle_request()
+    # Browsers send stray requests (favicon, prefetch) first; wait for the one carrying code/error.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        server.timeout = max(1, deadline - time.monotonic())
+        server.handle_request()
+        if server.callback and ("code" in server.callback or "error" in server.callback):
+            break
+        server.callback = None
     server.server_close()
     if not server.callback:
         raise TimeoutError("OAuth callback was not received")
