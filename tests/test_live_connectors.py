@@ -18,6 +18,7 @@ REQUIRED = {
 }
 
 
+@pytest.mark.live
 @pytest.mark.parametrize("name", list(REQUIRED))
 def test_live_probe_when_authorized(name):
     if os.getenv("RUN_LIVE_CONNECTOR_TESTS") != "1":
