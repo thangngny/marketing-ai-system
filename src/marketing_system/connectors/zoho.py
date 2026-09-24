@@ -132,6 +132,8 @@ class ZohoConnector(BaseConnector):
             timeout=30.0,
         )
         response.raise_for_status()
+        if response.status_code == 204 or not response.content:
+            return []  # Zoho answers 204 No Content when the (visible) module is empty
         return [
             normalize_zoho_record(
                 module,

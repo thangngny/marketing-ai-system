@@ -4,7 +4,7 @@ Source of truth at runtime: `uv run marketing-system doctor` (or MCP `system_con
 
 | Connector | AUTH | READ | ANALYTICS | DRAFT | PUBLISH | Evidence / blocker |
 |---|---|---|---|---|---|---|
-| Zoho CRM | LIVE_READ when the Claude Code session is fresh, else AUTHENTICATING | LIVE_READ (Leads 0, Accounts 0 — org sharing is **private**) | NOT_CONFIGURED | NOT_CONFIGURED (local task proposals only) | NOT_CONFIGURED | Transport `delegate` (owner's Claude Code session). That session expires ~hourly; durable fix = own Self Client refresh token (owner MFA once) |
+| Zoho CRM | LIVE_READ | LIVE_READ (Leads/Accounts/Contacts/Deals/Tasks = 0 visible — org sharing is **private**) | NOT_CONFIGURED | NOT_CONFIGURED (local task proposals only) | NOT_CONFIGURED | Own OAuth client "Buzz Marketing Hub" (REST, refresh token in vault, read-only scopes) since 2026-09-24; no hourly re-auth |
 | Apollo | NOT_CONFIGURED | NOT_CONFIGURED | – | – | – | Owner creates a scoped API key |
 | Microsoft 365 | NEEDS_MFA | NEEDS_MFA | – | NEEDS_MFA (Outlook draft code lands M10) | – | Entra app registration needs Authenticator |
 | Website | LIVE_READ | LIVE_READ | LIVE_READ | NOT_CONFIGURED | NOT_CONFIGURED | WordPress REST detected; 441 posts; ledger 2026-09-24 |
