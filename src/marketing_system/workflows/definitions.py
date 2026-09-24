@@ -99,12 +99,18 @@ def step_draft_emails(ctx: StepContext) -> StepOutcome:
             + json.dumps(facts, ensure_ascii=False)
             + '\nTrả về JSON {"subject": "...", "body": "..."}.'
         )
-        answer = ctx.ask(prompt, specialist="04_content", expect_json=True)
-        if not answer.ok:
-            return StepOutcome(status="blocked", detail=f"runtime {answer.runtime} → {answer.error_code}")
-        try:
-            draft = _Draft.model_validate(answer.structured or {})
-        except ValidationError:
+        draft = None
+        for attempt in range(2):  # LLM output is not guaranteed; retry once with a stricter reminder
+            answer = ctx.ask(prompt if attempt == 0 else prompt + "\nCHỈ in ra đúng một object JSON, không kèm chữ nào khác.",
+                             specialist="04_content", expect_json=True)
+            if not answer.ok:
+                return StepOutcome(status="blocked", detail=f"runtime {answer.runtime} → {answer.error_code}")
+            try:
+                draft = _Draft.model_validate(answer.structured or {})
+                break
+            except ValidationError:
+                continue
+        if draft is None:
             return StepOutcome(status="failed", detail=f"runtime {answer.runtime} returned no valid EmailDraft JSON")
         drafts.append({"lead_company": lead["company"], "to_name": lead.get("contact_name"),
                        "to_email": lead.get("email"), **draft.model_dump()})

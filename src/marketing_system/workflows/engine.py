@@ -7,6 +7,7 @@ workflow after a crash or restart. Transitions are validated against a table.
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
@@ -76,7 +77,7 @@ class StepContext:
         request = ConversationInput(text=text, correlation_id=self.workflow["correlation_id"],
                                     workflow_id=self.workflow["workflow_id"], source="workflow",
                                     user_id=self.workflow.get("user_id"), channel_id=self.workflow.get("channel_id"),
-                                    expect_json=expect_json)
+                                    expect_json=expect_json, metadata={"language_only": True})
         with span("runtime.invoke_specialist", self.engine.settings.log_dir, trace_id=self.workflow["correlation_id"],
                   runtime=self.engine.runtime.name, specialist=who.id, workflow_id=self.workflow["workflow_id"]) as sp:
             result = self.engine.runtime.invoke_specialist(who, request)
@@ -155,7 +156,12 @@ class WorkflowEngine:
     def start(self, workflow_type: str, request: str, *, params: dict[str, Any] | None = None,
               correlation_id: str | None = None, user_id: str | None = None, channel_id: str | None = None,
               run: bool = True) -> dict[str, Any]:
+        if os.getenv("MARKETING_NESTED") == "1":
+            raise RuntimeError("Refusing to start a workflow from inside a runtime call (recursion guard).")
         definition = self.definitions[workflow_type]
+        for active in self.store.list_workflows((NEW, PLANNED, RUNNING, RESUMING), limit=200):
+            if active["workflow_type"] == workflow_type and active["request"] == request:
+                return self.status(active["workflow_id"])  # same request already in flight: never fan out
         workflow_id = "wf-" + uuid4().hex[:12]
         self.store.create_workflow({
             "workflow_id": workflow_id, "correlation_id": correlation_id or new_correlation_id(),

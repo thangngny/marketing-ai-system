@@ -7,6 +7,7 @@ serving the conversation, as a specialist brief with its allowed tools.
 
 from __future__ import annotations
 
+import os
 from uuid import uuid4
 
 from . import gateway
@@ -120,6 +121,9 @@ class MarketingOrchestrator:
             return self._result(cid, intent, agents, "PASS_MOCK" if mock else "PASS", "\n".join(lines))
 
         if route.workflow_type:
+            if os.getenv("MARKETING_NESTED") == "1":
+                return self._result(cid, intent, agents, "REFUSED_NESTED",
+                                    "Yêu cầu này đến từ bên trong một lần gọi runtime; không tạo workflow lồng nhau.")
             status = self.platform.engine.start(route.workflow_type, request.text, params=_params_from(request.text),
                                                 correlation_id=cid, user_id=request.user_id,
                                                 channel_id=request.channel_id or self.settings.buzz_channel)

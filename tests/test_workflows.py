@@ -169,3 +169,27 @@ def test_background_mode_returns_immediately_and_finishes(env):
             break
         time.sleep(0.05)
     assert platform.engine.status(first["workflow_id"])["state"] == "DONE"
+
+
+def test_nested_runtime_call_cannot_start_workflows(env, monkeypatch):
+    make, _ = env
+    platform = make()
+    monkeypatch.setenv("MARKETING_NESTED", "1")
+    with pytest.raises(RuntimeError, match="recursion guard"):
+        start(platform)
+
+
+def test_same_request_in_flight_is_not_duplicated(env):
+    make, _ = env
+    platform = make()
+    first = platform.engine.start("prospect_to_draft", REQUEST, params={"count": 10}, run=False)
+    second = platform.engine.start("prospect_to_draft", REQUEST, params={"count": 10}, run=False)
+    assert first["workflow_id"] == second["workflow_id"]
+
+
+def test_drafting_asks_runtime_for_language_only(env):
+    make, _ = env
+    runtime = MockRuntime()
+    platform = make(runtime)
+    start(platform)
+    assert runtime.calls and all(c.metadata.get("language_only") for c in runtime.calls)

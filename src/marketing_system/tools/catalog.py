@@ -223,7 +223,23 @@ def prospecting_search_companies(args: SearchCompaniesIn, rt: HubRuntime) -> lis
         return [LeadCandidate(company=l.metadata["company"], domain=l.metadata["domain"], contact_name=l.full_name,
                               title=l.title, source="mock_apollo", environment=l.environment, synthetic=True,
                               score_reason=l.score_reason).model_dump(mode="json") for l in leads]
-    raise NotImplementedError("Apollo organization search lands in milestone 9.")
+    connector = rt.registry.get("apollo")
+    keywords = args.keywords or [args.industry]
+    rows = connector.search_companies(keywords, [args.location], per_page=args.limit)
+    seen, out = set(), []
+    for org in rows:
+        name = org.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        industry = org.get("industry") or ""
+        out.append(LeadCandidate(
+            company=name, domain=org.get("primary_domain") or org.get("website_url"), source="apollo",
+            environment=rt.settings.environment, synthetic=False,
+            score_reason=", ".join(x for x in (industry, org.get("city"), str(org.get("estimated_num_employees") or "")) if x),
+            source_reference=org.get("linkedin_url") or org.get("website_url"),
+        ).model_dump(mode="json"))
+    return out[: args.limit]
 
 
 def prospecting_search_people(args: SearchPeopleIn, rt: HubRuntime) -> list[dict[str, Any]]:

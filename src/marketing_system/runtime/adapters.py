@@ -39,6 +39,10 @@ class HermesRuntime(CliRuntime):
         args = ["-p", self.profile]
         if self.model:
             args += ["-m", self.model]
+        if request.metadata.get("language_only"):
+            # Drafting only: no AGENTS.md/skills (they say "call marketing_handle_request") and a
+            # harmless single toolset, so the model cannot re-enter the platform or run shell commands.
+            args += ["--ignore-rules", "-t", "todo"]
         return [*args, "-z", request.text]
 
     def health(self) -> RuntimeHealth:
@@ -85,6 +89,8 @@ class ClaudeRuntime(CliRuntime):
 
     def build_args(self, request: ConversationInput) -> list[str]:
         args = ["-p", "--output-format", "json"]
+        if request.metadata.get("language_only"):
+            args += ["--strict-mcp-config", "--disallowedTools", "Bash,Edit,Write,WebFetch"]
         if request.session_id:
             args += ["--resume", request.session_id]
         if self.model:

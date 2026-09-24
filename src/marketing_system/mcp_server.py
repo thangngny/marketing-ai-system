@@ -160,11 +160,8 @@ for _spec in platform.hub.specs():
 
 
 def main() -> None:
-    touched = platform.engine.recover()  # restart recovery: finish anything a previous process left mid-flight
-    if touched:
-        from .logging_utils import write_event
-
-        write_event(settings.log_dir, kind="recovery", workflows=touched)
+    # No recovery here: every runtime call can spawn an MCP server, and recovering from each of them
+    # caused a runaway loop (2026-09-24). Recovery runs once from scripts/start-all.ps1.
     server.run("stdio")
 
 

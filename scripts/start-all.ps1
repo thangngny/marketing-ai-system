@@ -9,6 +9,8 @@ $Hermes = Join-Path $env:LOCALAPPDATA 'hermes\bin\hermes.exe'
 $ProfileHome = Join-Path $env:LOCALAPPDATA 'hermes\profiles\marketing'
 
 New-Item -ItemType Directory -Path $Runtime -Force | Out-Null
+# Resume interrupted workflows exactly once per start (never from each MCP server spawn).
+& (Join-Path $env:LOCALAPPDATA 'hermes\bin\uv.exe') run --project $Root marketing-system workflows recover | Out-Null
 if (-not (Test-Path -LiteralPath $Hermes)) { throw "Hermes not found: $Hermes" }
 if (-not (Test-Path -LiteralPath $ProfileHome)) { throw 'Marketing profile missing. Run setup-profile.ps1.' }
 

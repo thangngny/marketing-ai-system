@@ -16,6 +16,21 @@ class ApolloConnector(BaseConnector):
             Capability(name="people_enrichment", impact=Impact.READ, cost_semantics="consumes credits", note="Never run from health checks."),
         ]
 
+    def search_companies(self, keywords: list[str], locations: list[str], per_page: int = 10) -> list[dict]:
+        """One page of organization search (1 credit/page). Never calls enrichment."""
+        response = self.request(
+            "POST",
+            "https://api.apollo.io/api/v1/mixed_companies/search",
+            headers={"accept": "application/json", "content-type": "application/json",
+                     "x-api-key": self.env("APOLLO_API_KEY") or ""},
+            json={"q_organization_keyword_tags": keywords, "organization_locations": locations,
+                  "page": 1, "per_page": min(max(per_page, 1), 25)},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        body = response.json()
+        return list(body.get("organizations") or []) + list(body.get("accounts") or [])
+
     def probe_live(self) -> tuple[bool, str]:
         response = self.request(
             "GET",

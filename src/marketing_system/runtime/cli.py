@@ -44,7 +44,8 @@ class CliRuntime(AgentRuntime):
         exe = self.executable()
         if not exe:
             return self._fail(request, started, "NOT_INSTALLED")
-        env = {**os.environ, "MARKETING_CORRELATION_ID": request.correlation_id}
+        # MARKETING_NESTED marks every child: a nested MCP server must never start or recover workflows.
+        env = {**os.environ, "MARKETING_CORRELATION_ID": request.correlation_id, "MARKETING_NESTED": "1"}
         if request.workflow_id:
             env["MARKETING_WORKFLOW_ID"] = request.workflow_id
         piped = self.stdin_prompt(request)

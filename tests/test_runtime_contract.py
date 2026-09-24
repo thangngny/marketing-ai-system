@@ -132,3 +132,27 @@ def test_live_hermes_marketing_profile_round_trip():
     assert runtime.health().state == "READY"
     result = runtime.run(req("Reply with exactly: HERMES_RUNTIME_OK"))
     assert result.ok and "HERMES_RUNTIME_OK" in result.text
+
+
+def test_hermes_language_only_disables_rules_and_tools():
+    from marketing_system.runtime.adapters import HermesRuntime
+
+    args = HermesRuntime(executable=["hermes"]).build_args(
+        ConversationInput(text="x", correlation_id="c", metadata={"language_only": True}))
+    assert "--ignore-rules" in args and args[args.index("-t") + 1] == "todo"
+
+
+def test_child_processes_are_marked_nested(monkeypatch):
+    monkeypatch.setenv("FAKE_MODE", "ok")
+    import subprocess as sp
+
+    seen = {}
+    real = sp.run
+
+    def spy(*a, **k):
+        seen["env"] = k.get("env", {})
+        return real(*a, **k)
+
+    monkeypatch.setattr(sp, "run", spy)
+    make("hermes").run(req())
+    assert seen["env"].get("MARKETING_NESTED") == "1"
