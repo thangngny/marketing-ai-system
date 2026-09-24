@@ -8,7 +8,7 @@ Earlier reports (Phase 1/2, 2026-09-19/22) are in git history (`git show pre-run
 
 ## Automated suite (`scripts\test.ps1`)
 
-**115 PASS · 9 SKIPPED (opt-in live) · 0 FAIL.** Tests write only to a temp directory.
+**119 PASS · 9 SKIPPED (opt-in live) · 0 FAIL.** Tests write only to a temp directory.
 
 | Layer | File | Result |
 |---|---|---|
@@ -33,7 +33,7 @@ Earlier reports (Phase 1/2, 2026-09-19/22) are in git history (`git show pre-run
 | `social.get_channel_metrics` / `get_recent_videos` | PASS_LIVE_READ | Minh Van Logistics: 2 subs, 3 videos, 214 views |
 | `website.get_metadata` / `get_recent_content` | PASS_LIVE_READ | WordPress REST, 441 posts |
 | `analytics.snapshot` | PASS_LIVE_READ | 4 FACT metrics; `crm_leads` listed unavailable, not guessed |
-| `crm.search_leads` | AUTHENTICATING | Zoho hosted-MCP client registered; owner consent pending |
+| `crm.search_leads` | PASS_LIVE_READ, later NEEDS_AUTH | Via Claude Code delegate: Leads 0 / Accounts 0; ~1 h later the Claude Zoho session expired and the hub reported NEEDS_AUTH (correct) |
 | `prospecting.search_companies` | NOT_CONFIGURED | Apollo key |
 | `email.get_unread_count` | NEEDS_MFA | Entra |
 | `ads.get_campaign_performance` | NOT_CONFIGURED | Meta |
