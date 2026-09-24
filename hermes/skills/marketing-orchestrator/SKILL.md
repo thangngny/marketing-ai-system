@@ -1,6 +1,6 @@
 ---
 name: marketing-orchestrator
-description: "Route marketing work through the tool hub, durable workflows and verified approvals."
+description: "Route work via tool hub, workflows and approvals."
 version: 2.0.0
 author: Workspace owner
 license: MIT
