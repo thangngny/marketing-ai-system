@@ -19,7 +19,7 @@ DIMENSIONS = ("AUTH", "READ", "ANALYTICS", "DRAFT", "PUBLISH")
 # What the code in this repo can do per connector (independent of credentials).
 CODE_SUPPORT: dict[str, set[str]] = {
     "zoho": {"READ"},
-    "apollo": set(),
+    "apollo": {"READ"},  # prospecting.search_companies (mixed_companies/search)
     "m365": {"READ"},
     "website": {"READ", "ANALYTICS"},
     "linkedin": set(),
