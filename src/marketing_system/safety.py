@@ -1,3 +1,10 @@
+"""Legacy action classifier kept for backward compatibility.
+
+Authorization now lives in policy.PolicyEngine + workflows.approvals. A boolean
+`explicit_approval` can no longer grant anything: approvals must be verified
+by an ApprovalVerifier (owner-signed Buzz message or local console).
+"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel
@@ -33,14 +40,14 @@ def classify_action(action: str) -> Impact:
         return Impact.DRAFT
     if action.startswith(("read_", "search_", "health", "status")):
         return Impact.READ
-    return Impact.WRITE
+    return Impact.WRITE_LOW_RISK
 
 
 def authorize(
     action: str,
     environment: Environment,
     safe_dry_run: bool,
-    explicit_approval: bool = False,
+    explicit_approval: bool = False,  # accepted for signature compatibility; never grants
 ) -> SafetyDecision:
     impact = classify_action(action)
     if impact in {Impact.READ, Impact.DRAFT}:
@@ -49,9 +56,7 @@ def authorize(
         return SafetyDecision(allowed=False, impact=impact, approval_required=True, reason="External writes are impossible in mock mode.")
     if safe_dry_run:
         return SafetyDecision(allowed=False, impact=impact, approval_required=True, reason="SAFE_DRY_RUN blocks external writes.")
-    if not explicit_approval:
-        return SafetyDecision(allowed=False, impact=impact, approval_required=True, reason="Explicit human approval is required.")
     if impact is Impact.HIGH_IMPACT:
         return SafetyDecision(allowed=False, impact=impact, approval_required=True, reason="High-impact execution is disabled in Phase 1 after approval capture.")
-    return SafetyDecision(allowed=True, impact=impact, approval_required=False, reason="Approved write is allowed by policy.")
-
+    return SafetyDecision(allowed=False, impact=impact, approval_required=True,
+                          reason="Writes run only through a workflow with a verified owner approval (DUYET <code> in Buzz).")

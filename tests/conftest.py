@@ -9,10 +9,16 @@ Live checks stay opt-in via RUN_LIVE_CONNECTOR_TESTS=1 (see test_live_connectors
 from __future__ import annotations
 
 import os
+import tempfile
 
 import pytest
 
 LIVE = os.getenv("RUN_LIVE_CONNECTOR_TESTS") == "1"
+
+# Never let tests write into the real data/ or logs/ directories.
+_SCRATCH = tempfile.mkdtemp(prefix="marketing-tests-")
+os.environ["MARKETING_DATA_DIR"] = os.path.join(_SCRATCH, "data")
+os.environ["MARKETING_LOG_DIR"] = os.path.join(_SCRATCH, "logs")
 
 if not LIVE:
     # Must run before any test module imports marketing_system.mcp_server,
@@ -20,6 +26,7 @@ if not LIVE:
     os.environ["MARKETING_ENV_FILE"] = os.devnull
     os.environ["MARKETING_ENVIRONMENT"] = "mock"
     os.environ["MARKETING_SAFE_DRY_RUN"] = "true"
+    os.environ.pop("MARKETING_RUNTIME", None)
 
 
 @pytest.fixture(autouse=True)

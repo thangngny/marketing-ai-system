@@ -10,6 +10,7 @@ from .constants import Environment
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+OWNER_PUBKEY = "057f0407663083746eee6457303cead9fe3eec3bbd39a17214d84c52a9080f2f"
 
 
 class Settings(BaseModel):
@@ -17,6 +18,10 @@ class Settings(BaseModel):
     safe_dry_run: bool = True
     data_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "data")
     log_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "logs")
+    # Public key of the Buzz workspace owner — the only identity whose signed message can approve.
+    owner_pubkey: str = OWNER_PUBKEY
+    # Buzz channel where approval requests are posted and owner replies are looked for (Welcome).
+    buzz_channel: str = "6fdc7c8d-8c62-4308-8228-fc3ec44944bb"
 
     @field_validator("safe_dry_run", mode="before")
     @classmethod
@@ -37,6 +42,8 @@ class Settings(BaseModel):
             safe_dry_run=os.getenv("MARKETING_SAFE_DRY_RUN", "true"),
             data_dir=Path(os.getenv("MARKETING_DATA_DIR") or PROJECT_ROOT / "data"),
             log_dir=Path(os.getenv("MARKETING_LOG_DIR") or PROJECT_ROOT / "logs"),
+            owner_pubkey=os.getenv("MARKETING_OWNER_PUBKEY") or OWNER_PUBKEY,
+            buzz_channel=os.getenv("MARKETING_BUZZ_CHANNEL") or "6fdc7c8d-8c62-4308-8228-fc3ec44944bb",
         )
 
     def ensure_runtime_dirs(self) -> None:

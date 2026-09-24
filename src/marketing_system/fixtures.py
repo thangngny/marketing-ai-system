@@ -71,6 +71,14 @@ def mock_logistics_leads(correlation_id: str, limit: int = 3) -> list[Lead]:
     return records
 
 
+def mock_crm_accounts() -> list[dict[str, object]]:
+    """Synthetic CRM state: one prospect above is 'already a customer' so dedupe is exercised."""
+    return [
+        {"Account_Name": "Công ty Vận tải Mẫu Sao Việt", "Website": "saoviet-forwarding.example.invalid",
+         "id": "mock-zoho-acc-1", "label": "SYNTHETIC_MOCK_DATA"},
+    ]
+
+
 def mock_campaign_metrics() -> list[dict[str, object]]:
     return [
         {"campaign": "MOCK - Forwarding Q3", "impressions": 12000, "clicks": 312, "leads": 18, "spend_vnd": 4_200_000},

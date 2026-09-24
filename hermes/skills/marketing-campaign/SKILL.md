@@ -22,7 +22,7 @@ Use for campaign briefs, work plans, channel coordination, budget proposals, and
 
 ## Prerequisites
 
-Use `marketing_handle_request` and `marketing_request_execution` for any proposed external action.
+Use `marketing_handle_request`; read performance with `ads_get_campaign_performance`. Launch/budget tools always become an owner-approval workflow and stay disabled in this phase.
 
 ## How to Run
 

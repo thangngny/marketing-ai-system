@@ -17,6 +17,17 @@ _SPECIALIST = re.compile(r"specialist `([0-9a-z_]+)`")
 def _default_responder(request: ConversationInput) -> str:
     match = _SPECIALIST.search(request.text)
     who = match.group(1) if match else "general"
+    if "SCHEMA:EmailDraft" in request.text:
+        company = "Quý công ty"
+        for line in request.text.splitlines():
+            if line.startswith("{") and '"company"' in line:
+                company = json.loads(line).get("company") or company
+                break
+        return json.dumps({
+            "subject": f"[MOCK] Minh Vân hỗ trợ vận chuyển cho {company}",
+            "body": f"[MOCK – bản nháp tổng hợp] Kính gửi {company}, Minh Vân Logistics xin phép giới thiệu dịch vụ "
+                    "forwarding door-to-door và thủ tục hải quan. Rất mong được trao đổi 15 phút vào tuần tới.",
+        }, ensure_ascii=False)
     if request.expect_json:
         return json.dumps({"mock": True, "specialist": who, "summary": f"MOCK output for {who}"}, ensure_ascii=False)
     return f"MOCK[{who}] {request.text.splitlines()[-1][:200]}"

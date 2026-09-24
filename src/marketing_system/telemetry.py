@@ -34,7 +34,11 @@ class Span:
         self.error_code: str | None = None
 
     def set(self, **attributes: Any) -> None:
-        self.attributes.update({k: v for k, v in attributes.items() if v is not None})
+        if "result" in attributes:
+            self.result = str(attributes.pop("result"))
+        if "error_code" in attributes:
+            self.error_code = attributes.pop("error_code")
+        self.attributes.update({k: v for k, v in attributes.items() if v is not None and k not in _RESERVED})
 
     def fail(self, error_code: str, result: str = "ERROR") -> None:
         self.error_code = error_code
@@ -55,7 +59,8 @@ def span(name: str, log_dir: Path, *, trace_id: str | None = None, **attributes:
     parent = _current.get()
     resolved_trace = trace_id or (parent.trace_id if parent else new_correlation_id())
     inherited = {k: v for k, v in (parent.attributes if parent else {}).items() if k in _INHERITED}
-    current = Span(name, resolved_trace, parent, {**inherited, **{k: v for k, v in attributes.items() if v is not None}})
+    current = Span(name, resolved_trace, parent, {})
+    current.set(**{**inherited, **attributes})
     token = _current.set(current)
     started = time.perf_counter()
     try:
@@ -80,6 +85,8 @@ def span(name: str, log_dir: Path, *, trace_id: str | None = None, **attributes:
             **current.attributes,
         )
 
+
+_RESERVED = {"kind", "name", "trace_id", "correlation_id", "span_id", "parent_span_id", "latency_ms", "timestamp"}
 
 # Attributes that describe the request context and should appear on every child span.
 _INHERITED = {"workflow_id", "buzz_event_id", "channel_id", "user_id", "runtime", "environment"}

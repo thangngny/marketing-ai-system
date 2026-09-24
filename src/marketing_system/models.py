@@ -135,10 +135,76 @@ CanonicalEntity = (
 )
 
 
+class LeadCandidate(BaseModel):
+    """Prospect after dedupe/scoring; crosses the Account Intelligence → Sales Copilot boundary."""
+
+    company: str
+    domain: str | None = None
+    contact_name: str | None = None
+    title: str | None = None
+    email: str | None = None
+    source: str
+    environment: Environment
+    synthetic: bool = False
+    in_crm: bool = False
+    crm_match: str | None = None
+    score: int = Field(default=0, ge=0, le=100)
+    score_breakdown: dict[str, int] = Field(default_factory=dict)
+    score_reason: str = ""
+    source_reference: str | None = None
+
+
+class EmailDraft(BaseModel):
+    to_name: str | None = None
+    to_email: str | None = None
+    subject: str
+    body: str
+    lead_company: str
+    environment: Environment
+    status: Literal["local_draft", "provider_draft"] = "local_draft"
+    provider_id: str | None = None
+
+
+class TaskProposal(BaseModel):
+    """A proposed Sales task. Not written to Zoho; Sales decides."""
+
+    subject: str
+    related_company: str
+    due_in_days: int = 3
+    owner_hint: str | None = None
+    reason: str
+    environment: Environment
+
+
+class MetricSnapshot(BaseModel):
+    name: str
+    value: float | int | None
+    unit: str = ""
+    source: str
+    kind: Literal["FACT", "INFERENCE", "HYPOTHESIS", "RECOMMENDATION"] = "FACT"
+    as_of: datetime = Field(default_factory=utc_now)
+    note: str = ""
+
+
+class ConnectorStatus(BaseModel):
+    connector: str
+    environment: str
+    capabilities: dict[str, str]  # AUTH / READ / ANALYTICS / DRAFT / PUBLISH -> CapabilityState
+    detail: str = ""
+
+
+class WorkflowPlan(BaseModel):
+    workflow_type: str
+    specialists: list[str]
+    steps: list[str]
+    approval_gates: list[str] = Field(default_factory=list)
+
+
 class RouteDecision(BaseModel):
     intent: str
     agents: list[str]
     reason: str
+    workflow_type: str | None = None
 
 
 class OrchestratorResult(BaseModel):
@@ -151,6 +217,8 @@ class OrchestratorResult(BaseModel):
     records: list[dict[str, Any]] = Field(default_factory=list)
     approval_required: bool = False
     side_effects: list[str] = Field(default_factory=list)
+    data: dict[str, Any] = Field(default_factory=dict)
+    runtime: str | None = None
 
 
 class ReadonlySyncResult(BaseModel):

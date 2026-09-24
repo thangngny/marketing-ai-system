@@ -17,6 +17,19 @@ _RULES: tuple[tuple[str, str, list[str], str], ...] = (
     ("strategy", r"(icp|positioning|chiến lược|chien luoc|objective|mục tiêu|muc tieu)", ["01_strategy"], "Yêu cầu chiến lược marketing."),
 )
 
+_WORKFLOW_RULES: tuple[tuple[str, str, list[str], str, str], ...] = (
+    (
+        "prospect_to_draft",
+        r"(?=.*(?:tìm|tim|find|search))(?=.*(?:lead|doanh nghiệp|doanh nghiep|công ty|cong ty|khách hàng|khach hang|prospect))"
+        r"(?=.*(?:email|thư|thu |draft|outlook))",
+        ["03_account_intelligence", "04_content", "06_sales_copilot"],
+        "Nhiều bước + cần duyệt: chạy workflow bền vững.",
+        "prospect_to_draft",
+    ),
+)
+
+_OVERVIEW = r"(hệ thống|he thong).*(thế nào|the nao|ra sao|hôm nay|hom nay)|(hôm nay|hom nay).*(hệ thống|he thong)|system overview"
+
 _MULTI_AGENT_RULES: tuple[tuple[str, str, list[str], str], ...] = (
     (
         "competitive_campaign_content",
@@ -29,6 +42,11 @@ _MULTI_AGENT_RULES: tuple[tuple[str, str, list[str], str], ...] = (
 
 def route_intent(text: str) -> RouteDecision:
     normalized = " ".join(text.lower().split())
+    if re.search(_OVERVIEW, normalized, flags=re.I):
+        return RouteDecision(intent="system_overview", agents=[], reason="Tổng quan: connector, workflow, approval.")
+    for intent, pattern, agents, reason, workflow_type in _WORKFLOW_RULES:
+        if re.search(pattern, normalized, flags=re.I):
+            return RouteDecision(intent=intent, agents=agents, reason=reason, workflow_type=workflow_type)
     for intent, pattern, agents, reason in _MULTI_AGENT_RULES:
         if re.search(pattern, normalized, flags=re.I):
             return RouteDecision(intent=intent, agents=agents, reason=reason)
