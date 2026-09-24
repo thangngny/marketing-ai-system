@@ -1,110 +1,56 @@
-# AI Marketing System Architecture
+# Architecture
 
-## Runtime path
+Decision record: [docs/ADR-runtime-agnostic-marketing-platform.md](docs/ADR-runtime-agnostic-marketing-platform.md). Modular monolith: one Python package, one MCP server process, one SQLite file.
 
 ```text
-Buzz user/channel
-  │
+USER
+  │  Buzz (chat, approvals, notifications)
   ▼
-Hermes native Buzz gateway
-  │  isolated profile: marketing (logical role: marketing_orchestrator)
+Wire transport (supplied by the active runtime)
+  ├─ Hermes native Buzz gateway  (profile `marketing`, bot 8f006f39…, channel Welcome)   ← production today
+  └─ Buzz Desktop ACP agents (Claude / Codex)                                            ← same hub, config only
   ▼
-Marketing Orchestrator
-  ├─ deterministic intent routing
-  ├─ specialist Hermes skills
-  ├─ approval and impact policy
-  └─ coherent final answer
-  │
+AgentRuntime  runtime/            HermesRuntime · ClaudeRuntime · CodexRuntime · MockRuntime (one contract)
+  ▼  MCP stdio  (mcp_server.py — tool boundary only)
+Conversation Gateway  gateway.py  normalize · identity · channel · Buzz event dedupe
+Orchestrator          orchestrator.py + routing.py
+  ├─ fast path  → tool hub → answer
+  ├─ workflow   → workflows/engine.py (durable)
+  └─ brief      → specialist instructions + allowed tools handed back to the runtime
+Specialists           specialists.py   8 logical roles (data, not processes)
+Policy                policy.py        ALLOW / DENY / REQUIRE_APPROVAL (code)
+Approvals             workflows/approvals.py   payload-bound, expiring, verifier-only
+Tool hub              tools/hub.py + tools/catalog.py   26 typed tools, 10 namespaces
+Connectors            connectors/*     zoho (REST | hosted MCP) · m365 · apollo · linkedin · youtube · meta_ads · google_ads · website
   ▼
-Marketing MCP server (stdio, project-local Python environment)
-  ├─ connector registry and status
-  ├─ canonical model validation and read-only live normalization
-  ├─ SQLite staging store
-  ├─ structured audit log
-  └─ mock/live adapter selection
-       ├─ Zoho CRM
-       ├─ Microsoft Graph
-       ├─ Apollo
-       ├─ LinkedIn
-       ├─ YouTube
-       ├─ Meta Ads
-       ├─ Google Ads
-       └─ Website
+Provider APIs
 ```
 
-The integration service does not listen on a TCP port in the default deployment. Hermes launches it over stdio as an MCP server. SQLite is the only local datastore.
+Cross-cutting: `telemetry.py` (OTel-shaped spans in `logs/marketing.jsonl`), `credentials.py` (Windows Credential Manager), `models.py` (canonical entities), `capabilities.py` (per-capability truth), `workflows/store.py` (SQLite system of record for execution).
 
-## Ownership boundaries
+## Ownership
 
-| Layer | Owns | Does not own |
+| Layer | Owns | Never owns |
 |---|---|---|
-| Buzz | Human conversation, membership, visible approvals | Business data or connector credentials |
-| Hermes | Conversation, memory, sessions, skill selection, final response | Provider-specific payload formats |
-| Router | Maps an intent to the minimum specialist set | Model inference or external authorization |
-| Specialist skills | Marketing methods and output expectations | Direct API credentials |
-| MCP integration server | Typed tools, safety policy, adapters, canonical mapping | Buzz transport or Hermes sessions |
-| SQLite staging | Local canonical mock/staging records | Production system-of-record authority |
-| Zoho (pending OAuth) | CRM source of truth only after OAuth, live probe, mapping validation, and owner sign-off | Mock/synthetic records |
+| Buzz | conversation, owner's signed approvals | business data, credentials |
+| Runtime (Hermes/Claude/Codex) | language: understanding, drafting, analysis | permission, approval, state |
+| Orchestrator | routing, fast reads, starting workflows | provider payloads |
+| Workflow engine | state machine, step persistence, resume | provider logic |
+| Policy + approvals | whether an action may run | — |
+| Tool hub | validation, idempotency, ledger, spans | routing |
+| Connectors | auth, retries, pagination, normalization | policy |
+| Zoho | CRM relationships (System of Record) | workflow state |
+| SQLite | workflows, approvals, tool ledger, dedupe, staging | CRM truth |
 
-## Specialist routing
+## Two execution paths
 
-| Intent example | Selected specialist(s) |
-|---|---|
-| Phân tích đối thủ / thị trường | `02_market_intelligence` (+ `01_strategy` for recommendations) |
-| ICP / định vị / mục tiêu | `01_strategy` |
-| Tìm lead / nghiên cứu account | `03_account_intelligence` |
-| Viết nội dung / landing page / video brief | `04_content` |
-| SEO, keyword, AI-search/GEO | `05_seo_geo` |
-| Chuẩn bị cuộc gọi / follow-up / deal support | `03_account_intelligence`, `06_sales_copilot` |
-| Lập chiến dịch đa kênh | `01_strategy`, `07_campaign` |
-| Báo cáo hiệu quả / attribution | `08_kpi_learning` |
-| Trạng thái hệ thống | Orchestrator + connector registry only |
+- **A — fast**: `marketing_handle_request` → route → hub READ tools → answer. Example: status, lead count, KPI snapshot.
+- **B — durable**: route → `WorkflowEngine.start` → steps persisted → `WAITING_APPROVAL` → owner replies `DUYET <code>` in Buzz (signed) → `workflow_resume` / restart recovery → `DONE`.
 
-## Connector state model
+## Switching runtime
 
-| State | Meaning |
-|---|---|
-| `CONNECTED` | Credentials exist and a non-destructive live probe succeeded |
-| `MOCK_READY` | Deterministic mock capability is usable |
-| `NEEDS_AUTH` | Software/config is prepared but credentials or OAuth consent are missing |
-| `DISABLED` | Operator policy disables the connector or operation |
-| `DEGRADED` | Partially usable; a dependency or capability failed |
-| `ERROR` | Probe or request failed and no healthy path exists |
+Hermes: profile `marketing` registers `marketing-system` MCP. Claude: `claude -p … --mcp-config runtime-configs/claude-mcp.json`. Codex: same server in `~/.codex/config.toml`. `MARKETING_RUNTIME` selects which runtime the workflow engine uses for language steps. Connectors, policy, workflows and models are untouched.
 
-Status must distinguish readiness from proof. Connector code alone is never reported as `CONNECTED`; only a live probe may establish that state.
+## Deliberately absent
 
-## Environments
-
-- `mock` (default): deterministic synthetic data only; no external calls.
-- `sandbox`: explicit external test environment; no production mutations.
-- `production`: explicit opt-in plus credentials; high-impact actions still require approval.
-
-The environment is stored on every canonical record and every structured log event.
-
-## Safety flow
-
-```text
-Request
-  → classify READ / DRAFT / WRITE / HIGH_IMPACT
-  → verify configured environment
-  → verify connector capability and auth
-  → for WRITE/HIGH_IMPACT: require explicit approval context
-  → execute or return an approval-required draft
-  → record correlation_id and outcome
-```
-
-Phase 1 implements no paid-campaign launch, budget mutation, email send, public publication, outreach send, CRM delete, or permission change.
-
-## Secrets
-
-Business connector secrets live in the current user's Windows Credential Manager under `BuzzMarketing/`. Hermes/Buzz identity material remains in the isolated Hermes profile's restricted `.env`. Project `.env` files are ignored by Git and are not used for connector tokens. Logs redact keys, tokens, authorization headers, cookies, and OAuth codes; provider secrets are sent in headers or request bodies rather than query strings.
-
-## Operational shape
-
-- `scripts/start-all.ps1`: validates dependencies, starts the isolated Hermes gateway once.
-- `scripts/stop-all.ps1`: stops only the marketing profile gateway.
-- `scripts/status-all.ps1`: reports process and connector state.
-- `scripts/doctor.ps1`: human-readable component diagnostics.
-- `scripts/smoke-test.ps1`: unit/contract/mock/routing/security tests and optional Buzz checks.
-
-Linux `.sh` wrappers are portability aids, not the active service mechanism on this audited host.
+Temporal, Kafka, Redis, containers, vector DB, per-provider MCP servers, per-specialist processes or Buzz bots, analytics warehouse.

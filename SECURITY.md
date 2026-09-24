@@ -11,15 +11,23 @@
 
 ## Tool impact classes
 
-| Class | Default behavior | Examples |
+Every tool declares its impact in `tools/catalog.py`. `policy.PolicyEngine` decides in code; no prompt changes the result.
+
+| Class | Decision | Examples |
 |---|---|---|
-| READ | May run when access exists | status, CRM read, metrics query |
-| DRAFT | May create local/internal drafts | post draft, campaign plan, staged lead |
-| WRITE | Requires explicit human approval and non-mock mode | approved CRM create/update |
-| HIGH_IMPACT | Always approval-gated; disabled in Phase 1 | send email/outreach, publish, launch ads, change budget, delete CRM data, change permissions |
+| READ | ALLOW (if the specialist may use the namespace) | `crm_search_leads`, `social_get_channel_metrics`, `analytics_snapshot` |
+| DRAFT | ALLOW; idempotent | `email_create_draft`, `crm_propose_task`, `content_save_draft` |
+| WRITE_LOW_RISK | REQUIRE_APPROVAL; then SAFE_DRY_RUN still blocks outside mock | `crm_create_task` |
+| HIGH_IMPACT | REQUIRE_APPROVAL, single-use, and DENY unless the tool is explicitly enabled (none are) | `email_send`, `social_publish_post`, `ads_launch_campaign`, `ads_change_budget`, `crm_delete_record` |
 
-The code-level `authorize()` gate is authoritative. A prompt asking to bypass it does not change the result.
+Specialist ceilings: no specialist may request HIGH_IMPACT; `08_kpi_learning` and `02_market_intelligence` are READ-only.
 
+## Approval boundary
+
+- No MCP tool accepts an approval flag (tested: `test_no_mcp_tool_can_assert_approval`). The old `explicit_approval` argument was removed from the MCP surface.
+- An approval moves to APPROVED only through a verifier: an owner-**signed** Buzz message `DUYET <code>` (`BuzzSignedEventVerifier`), or `marketing-system approvals approve` at an interactive terminal.
+- Approvals bind tool + SHA-256 of the canonical payload + expiry; a changed payload requires a fresh approval.
+- The Buzz verifier reads the channel with a dedicated reader identity key (`BuzzMarketing/BUZZ_APPROVAL_READER_KEY`). Hermes' own bot key is sealed by Hermes and is deliberately not reused.
 ## Secret storage
 
 - Business-service secrets: Windows Credential Manager under the `BuzzMarketing/` namespace.
@@ -29,6 +37,8 @@ The code-level `authorize()` gate is authoritative. A prompt asking to bypass it
 - Structured logging recursively redacts secret/token/password/private-key/authorization/cookie fields.
 - Use a dedicated agent Nostr key; never reuse the human owner's key.
 - `marketing-system credentials set NAME` reads the value through a hidden prompt; the value is never an argument or printed output.
+- Values larger than one Credential Manager blob (2,560 bytes) are split into `NAME_0..n` entries (Zoho MCP OAuth client/tokens).
+- Zoho hosted-MCP endpoint, OAuth client and tokens: `BuzzMarketing/ZOHO_MCP_URL`, `ZOHO_MCP_CLIENT*`, `ZOHO_MCP_TOKENS*`.
 
 ## Data separation
 

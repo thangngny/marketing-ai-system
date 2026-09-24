@@ -25,6 +25,34 @@ The gateway starts automatically at user login. Manual lifecycle commands are id
 .\scripts\stop-all.ps1
 ```
 
+## The five commands
+
+```powershell
+.\scripts\start-all.ps1     # idempotent; starts the Hermes gateway once
+.\scripts\stop-all.ps1
+.\scripts\status.ps1        # doctor + workflows + approvals
+.\scripts\doctor.ps1        # every component with exact capability states
+.\scripts\test.ps1 [-Live]  # full suite; -Live adds read-only provider checks
+```
+
+## Workflows and approvals
+
+```powershell
+uv run marketing-system workflows list
+uv run marketing-system workflows status <workflow_id>
+uv run marketing-system workflows resume <workflow_id>
+uv run marketing-system approvals list
+uv run marketing-system approvals approve <MV-CODE>   # interactive terminal only
+```
+
+In Buzz the owner approves by replying `DUYET <MV-CODE>` (or `TUCHOI <MV-CODE>`) in the channel where the request was posted.
+
+## Switching runtime
+
+- Hermes (default, production): nothing to do.
+- Claude: `claude -p "<request>" --mcp-config runtime-configs/claude-mcp.json --strict-mcp-config`.
+- `MARKETING_RUNTIME=hermes|claude|codex|mock` selects the runtime the workflow engine uses for drafting steps.
+
 ## Diagnostics and tests
 
 ```powershell
@@ -48,6 +76,7 @@ The `set` command uses a hidden prompt. After provider app registration, the sup
 ```powershell
 uv run marketing-system oauth zoho
 uv run marketing-system oauth m365
+uv run marketing-system oauth zoho-mcp   # Zoho via its official hosted MCP server; one browser consent
 ```
 
 Read-only live ingestion is exposed to Hermes through `marketing_sync_readonly`. It is refused in `mock`, live-verifies the connector first, normalizes provider records, and writes only to SQLite staging.

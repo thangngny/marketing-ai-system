@@ -13,7 +13,6 @@ from .config import PROJECT_ROOT, Settings
 from .constants import TestState
 from .credentials import available as credential_store_available
 from .credentials import credential_present, write_credential
-from .mcp_server import server
 from .oauth import authorize_m365, authorize_zoho
 from .orchestrator import MarketingOrchestrator
 from .routing import route_intent
@@ -65,54 +64,21 @@ def _run_redacted(command: list[str], timeout: int = 20) -> tuple[int, str]:
 
 
 def command_doctor(args: argparse.Namespace) -> int:
-    settings = Settings.from_env()
-    orchestrator = MarketingOrchestrator(settings)
-    hermes = _find_hermes()
-    buzz = _find_buzz()
-    checks: list[tuple[str, str, str]] = []
-    checks.append(("Buzz", "OK" if buzz else "FAIL", f"CLI: {buzz or 'not found'}"))
-    if hermes:
-        code, version = _run_redacted([hermes, "--version"])
-        checks.append(("Hermes", "OK" if code == 0 else "FAIL", version.splitlines()[0] if version else "no output"))
-        profile_home = Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes" / "profiles" / "marketing"
-        code, model = _run_redacted([hermes, "-p", "marketing", "config", "get", "model"])
-        auth_file = profile_home / "auth.json"
-        provider_ok = code == 0 and "provider:" in model and auth_file.is_file() and auth_file.stat().st_size > 2
-        provider_detail = "configured for marketing profile" if provider_ok else "NEEDS_AUTH"
-        checks.append(("Hermes provider", "OK" if provider_ok else "FAIL", provider_detail))
+    from .ops import doctor
 
-        code, gateway = _run_redacted([hermes, "-p", "marketing", "gateway", "status"])
-        gateway_running = code == 0 and "not running" not in gateway.lower() and "stopped" not in gateway.lower()
-        buzz_connected = False
-        try:
-            state = json.loads((profile_home / "gateway_state.json").read_text(encoding="utf-8"))
-            buzz_connected = state.get("gateway_state") == "running" and state.get("platforms", {}).get("buzz", {}).get("state") == "connected"
-        except (OSError, ValueError, TypeError):
-            pass
-        gateway_ok = gateway_running and buzz_connected
-        checks.append(("Hermes - Buzz", "OK" if gateway_ok else "FAIL", "gateway live" if gateway_ok else "not live-verified"))
-    else:
-        checks.extend(
-            [
-                ("Hermes", "FAIL", "not found"),
-                ("Hermes provider", "FAIL", "not found"),
-                ("Hermes - Buzz", "FAIL", "not found"),
-            ]
-        )
-    try:
-        result = orchestrator.handle("Kiểm tra trạng thái toàn bộ hệ thống.", source_channel="doctor")
-        checks.append(("Marketing Orchestrator", "OK", result.result_state))
-        checks.append(("MCP/Integration server", "OK", "6 typed tools registered"))
-    except Exception as exc:
-        checks.append(("Marketing Orchestrator", "FAIL", type(exc).__name__))
-        checks.append(("MCP/Integration server", "FAIL", type(exc).__name__))
-    print("\nComponent diagnostics")
-    for component, state, detail in checks:
-        print(f"{component}: {state} - {detail}")
-    print("\nConnectors")
-    for report in orchestrator.registry.reports(live_probe=args.live):
-        print(f"{report.connector}: {report.current_state} / live={report.live_state}")
-    return 0 if all(state == "OK" for _, state, _ in checks) else 1
+    return doctor(live=args.live)
+
+
+def command_workflows(args: argparse.Namespace) -> int:
+    from .ops import workflows
+
+    return workflows(args.action, args.workflow_id)
+
+
+def command_approvals(args: argparse.Namespace) -> int:
+    from .ops import approvals
+
+    return approvals(args.action, args.code)
 
 
 def command_route(args: argparse.Namespace) -> int:
@@ -184,7 +150,12 @@ def command_credentials_set(args: argparse.Namespace) -> int:
 
 
 def command_oauth(args: argparse.Namespace) -> int:
-    result = authorize_m365() if args.provider == "m365" else authorize_zoho()
+    if args.provider == "zoho-mcp":
+        from .connectors.zoho_mcp import authorize as authorize_zoho_mcp
+
+        result = authorize_zoho_mcp()
+    else:
+        result = authorize_m365() if args.provider == "m365" else authorize_zoho()
     print(f"{result['provider']}: {result['state']} (token value not displayed)")
     return 0
 
@@ -218,8 +189,16 @@ def build_parser() -> argparse.ArgumentParser:
     credentials_set = credential_sub.add_parser("set")
     credentials_set.add_argument("name")
     credentials_set.set_defaults(func=command_credentials_set)
+    workflows = sub.add_parser("workflows")
+    workflows.add_argument("action", choices=["list", "status", "resume", "cancel", "recover"])
+    workflows.add_argument("workflow_id", nargs="?")
+    workflows.set_defaults(func=command_workflows)
+    approvals = sub.add_parser("approvals")
+    approvals.add_argument("action", choices=["list", "check", "approve", "reject"])
+    approvals.add_argument("code", nargs="?")
+    approvals.set_defaults(func=command_approvals)
     oauth = sub.add_parser("oauth")
-    oauth.add_argument("provider", choices=["m365", "zoho"])
+    oauth.add_argument("provider", choices=["m365", "zoho", "zoho-mcp"])
     oauth.set_defaults(func=command_oauth)
     return parser
 

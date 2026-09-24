@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "marketing-system": {
+      "command": "C:\\Users\\Admin\\marketing-ai-system\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "marketing_system.mcp_server"],
+      "env": {"MARKETING_RUNTIME": "claude"}
+    }
+  }
+}

@@ -23,6 +23,25 @@ class ZohoConnector(BaseConnector):
         super().__init__(settings)
         self._cached_access_context: tuple[str, str] | None = None
 
+    # -- transport selection: own OAuth client (REST) first, else Zoho's hosted MCP server --
+    def transport(self) -> str | None:
+        if all(self.env(key) for key in self.required_env):
+            return "rest"
+        from . import zoho_mcp
+
+        if zoho_mcp.endpoint() and zoho_mcp.has_tokens():
+            return "mcp"
+        return None
+
+    def configured(self) -> bool:
+        return self.transport() is not None
+
+    def credential_presence(self) -> tuple[list[str], list[str]]:
+        present, missing = super().credential_presence()
+        if self.transport() == "mcp":
+            return [*present, "ZOHO_MCP_URL", "ZOHO_MCP_TOKENS"], []
+        return present, missing
+
     @property
     def capabilities(self) -> list[Capability]:
         return [
@@ -57,6 +76,12 @@ class ZohoConnector(BaseConnector):
         return self._cached_access_context
 
     def probe_live(self) -> tuple[bool, str]:
+        if self.transport() == "mcp":
+            from . import zoho_mcp
+
+            body = zoho_mcp.call_tool("ZohoCRM_getRecordCount", {"path_variables": {"moduleApiName": "Leads"}})
+            ok = isinstance(body, dict) and body.get("status") == "success"
+            return ok, "Zoho hosted-MCP count probe " + ("succeeded." if ok else "failed.")
         access_token, api_domain = self._access_context()
         probe = self.request(
             "GET",
@@ -74,6 +99,16 @@ class ZohoConnector(BaseConnector):
         module, fields = self._resources[resource]
         limit = min(max(int(kwargs.get("limit", 25)), 1), 200)
         correlation_id = str(kwargs.get("correlation_id") or "zoho-read")
+        if self.transport() == "mcp":
+            from . import zoho_mcp
+
+            body = zoho_mcp.call_tool("ZohoCRM_getRecords", {
+                "path_variables": {"moduleApiName": module},
+                "query_params": {"fields": fields.replace("id,", ""), "per_page": limit},
+            })
+            rows = body.get("data", []) if isinstance(body, dict) else []
+            return [normalize_zoho_record(module, record, environment=self.settings.environment,
+                                          correlation_id=correlation_id) for record in rows]
         access_token, api_domain = self._access_context()
         response = self.request(
             "GET",
