@@ -68,3 +68,8 @@ Baseline tag: `pre-runtime-agnostic-architecture` (commit `8f2a78b`).
 - Windows Credential Manager secret store (`credentials.py`), OAuth PKCE helpers (`oauth.py`).
 - Existing MCP tool names used by the Hermes skill (`marketing_handle_request`, `marketing_system_status`, `marketing_sync_readonly`).
 - Scripts `start-all / stop-all / status-all / doctor / smoke-test` (idempotent start already proven).
+
+## After hardening (2026-09-24, same day)
+
+See ARCHITECTURE.md and TEST_REPORT.md. P0 self-approval removed; doctor uses process truth; Hermes behind AgentRuntime; 115 tests pass.
+

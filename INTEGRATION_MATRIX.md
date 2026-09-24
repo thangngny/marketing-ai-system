@@ -1,6 +1,6 @@
 # Integration Matrix
 
-Snapshot: 2026-09-22. `CONNECTED` is used only after a successful live probe.
+Snapshot: 2026-09-24 (per-capability view: CAPABILITY_MATRIX.md). `CONNECTED` is used only after a successful live probe.
 
 | SERVICE | PURPOSE | SOFTWARE_READY? | CONNECTOR_READY? | AUTH_READY? | LIVE_TESTED? | CURRENT_MODE | BLOCKER | NEXT_STEP |
 |---|---|---|---|---|---|---|---|---|
@@ -9,7 +9,7 @@ Snapshot: 2026-09-22. `CONNECTED` is used only after a successful live probe.
 | Hermes ↔ Buzz | Primary transport | Software present | Native gateway configured | Owner allowlist + bot channel role verified | Yes | CONNECTED + LIVE_VERIFIED | — | Monitor with `doctor.ps1` |
 | Marketing MCP | Routing/tool boundary | INSTALLED in project `.venv` | 6 tools enabled in profile | Not required | Yes, local stdio | CONNECTED_LOCAL | — | Keep local and pinned |
 | SQLite staging | Canonical mock/staging store | Python stdlib | Ready | Not required | Yes | MOCK_READY | — | Use production namespace only after live source verification |
-| Zoho CRM | Leads, contacts, accounts, deals, tasks | REST client ready | Read-only OAuth callback, refresh, probe, normalization | Web account + CRM org confirmed | No | MOCK_READY + NEEDS_AUTH | Zoho API Console requires owner MFA before app creation | Complete MFA; create local callback app; run read-only OAuth and probe |
+| Zoho CRM | Leads, contacts, accounts, deals, tasks (System of Record) | REST client + hosted-MCP transport | Read + normalization via `ZohoCRM_getRecords`; REST path still available | Hosted-MCP OAuth client registered 2026-09-24; **owner consent pending** | Via Claude Code: count Leads = 0 (success) | AUTHENTICATING | Owner clicks Accept once (`marketing-system oauth zoho-mcp`) | Then `live_read_check.py` → LIVE_READ |
 | Microsoft 365 | Mail metadata, calendar, files | REST client ready | PKCE callback, refresh, Graph probe, mail metadata normalization | Outlook/OneDrive session confirmed | No | MOCK_READY + NEEDS_AUTH | Entra portal requires Authenticator code; app registration not created | Complete MFA; register public client with delegated read scopes; run OAuth and probe |
 | Apollo | People/company search and enrichment | REST client ready | No-credit auth probe + cost metadata + mocks | Account evidence exists; current Apollo session logged out | No | MOCK_READY + NEEDS_AUTH | Login and scoped API key creation required | Sign in, create scoped key, store in Credential Manager, call `/auth/health` only |
 | LinkedIn | Page/account read and post drafts | REST client ready | OAuth/access-state adapter + mocks | Member + developer portal session confirmed | No | MOCK_READY + NEEDS_ACCESS | No developer app; company Page was not offered for association; legal acceptance is owner-only | Verify Page admin/association, accept terms, then create app and request minimal product access |
