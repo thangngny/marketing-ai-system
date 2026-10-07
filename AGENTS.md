@@ -35,6 +35,13 @@ Every agent can delegate tasks to the local OpenAI Codex Desktop App via:
 - `codex_open()`: Launch and bring Codex Desktop App to front.
 - `codex_status()`: Report whether Codex CLI, App-Server daemon, and Desktop App are alive.
 
+## Automated AI Video Pipeline & Technology Attribution
+
+Khi người dùng yêu cầu làm video ("tạo video", "làm clip", "sản xuất video", "video TikTok", "clip logistics"):
+1. Kích hoạt dây chuyền video tự động qua tool `video.produce_full_video`, workflow `video_production` hoặc CLI `tools/video_pipeline.py`.
+2. Hỗ trợ 4 chế độ: `hybrid` (Stock Pexels + AI), `avatar` (HeyGen MC Lina), `cinematic` (Higgsfield Kling 3.0), `motion` (HyperFrames).
+3. **BẮT BUỘC**: Khi hoàn thành video, LUÔN trả về link xem trực tiếp (Blossom Media Link) kèm **Bảng phân tích công nghệ tích hợp (Technology Attribution Report)** liệt kê chi tiết các công nghệ đã kết hợp (Kịch bản, Giọng đọc ElevenLabs, Hình ảnh/Avatar HeyGen/Higgsfield, Phụ đề động Whisper, FFmpeg Ducking, Blossom Server, TikTok API).
+
 ## Buzz response style
 
 Final result only, in Vietnamese, no tool-progress narration.

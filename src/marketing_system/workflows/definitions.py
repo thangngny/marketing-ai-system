@@ -194,4 +194,77 @@ TOOL_APPROVAL = WorkflowDefinition(
     steps=[WorkflowStep("call", "00_orchestrator", step_tool_call)],
 )
 
-DEFINITIONS: dict[str, WorkflowDefinition] = {d.workflow_type: d for d in (PROSPECT_TO_DRAFT, TOOL_APPROVAL)}
+
+# ---------------------------------------------------------------- video production pipeline
+def step_video_plan(ctx: StepContext) -> StepOutcome:
+    p = ctx.params
+    title = p.get("title", "Video Minh Van Logistics")
+    script = p.get("script", "")
+    mode = p.get("mode", "hybrid")
+    ratio = p.get("aspect_ratio", "9:16")
+
+    if not script:
+        # Prompt Content Specialist for high-hook 30s-45s script
+        prompt = (
+            f"SCHEMA:VideoScript. Viết kịch bản video ngắn (30-45 giây, dưới 100 từ) cho chủ đề: '{title}'.\n"
+            "Cấu trúc bắt buộc: 3 giây đầu câu hook giữ chân + 25 giây thân bài chia sẻ giá trị thực tế logistics + 5 giây kêu gọi hành động.\n"
+            "Chỉ in ra nội dung lời đọc bằng tiếng Việt, tự nhiên và chuyên nghiệp."
+        )
+        ans = ctx.ask(prompt, specialist="04_content")
+        script = ans.text if ans.ok else "Chào mừng bạn đến với giải pháp logistics và vận chuyển quốc tế của Minh Vân."
+
+    return StepOutcome(status="done", output={"title": title, "script": script, "mode": mode, "aspect_ratio": ratio})
+
+
+def step_video_compose(ctx: StepContext) -> StepOutcome:
+    plan = ctx.outputs["plan"]
+    p = ctx.params
+    auto_pub = p.get("auto_publish", False)
+
+    result = ctx.tool(
+        "video.produce_full_video",
+        {
+            "title": plan["title"],
+            "script": plan["script"],
+            "mode": plan["mode"],
+            "aspect_ratio": plan["aspect_ratio"],
+            "enable_subtitles": p.get("enable_subtitles", True),
+            "auto_publish": auto_pub,
+        },
+        idempotency_key=f"{ctx.workflow['workflow_id']}:compose",
+        specialist="04_content",
+    )
+    blocked = _tool_outcome(result)
+    if blocked:
+        return blocked
+
+    return StepOutcome(status="done", output=result.data)
+
+
+def finalize_video(wf: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    comp = out.get("compose", {})
+    return {
+        "workflow_id": wf.get("workflow_id"),
+        "title": comp.get("title"),
+        "duration": comp.get("duration"),
+        "video_path": comp.get("video_path"),
+        "blossom_url": comp.get("blossom_url"),
+        "technology_attribution": comp.get("technology_attribution", {}),
+        "social_status": comp.get("social_status", {}),
+        "summary_report": comp.get("summary_report", ""),
+    }
+
+
+VIDEO_PRODUCTION = WorkflowDefinition(
+    workflow_type="video_production",
+    description="End-to-End AI Video Pipeline: Script Hook 3s → ElevenLabs/HeyGen Voice → Visual B-roll → Whisper Kinetic Subtitles → FFmpeg Ducking → Blossom Export → Multi-platform Attribution.",
+    steps=[
+        WorkflowStep("plan", "04_content", step_video_plan),
+        WorkflowStep("compose", "04_content", step_video_compose),
+    ],
+    finalize=finalize_video,
+)
+
+DEFINITIONS: dict[str, WorkflowDefinition] = {
+    d.workflow_type: d for d in (PROSPECT_TO_DRAFT, TOOL_APPROVAL, VIDEO_PRODUCTION)
+}

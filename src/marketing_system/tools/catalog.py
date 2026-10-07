@@ -110,6 +110,18 @@ class TikTokDraftIn(BaseModel):
     privacy_level: str = Field("SELF_ONLY", description="Mức độ riêng tư: SELF_ONLY (chỉ mình tôi - Sandbox).")
 
 
+class VideoProduceIn(BaseModel):
+    title: str = Field(min_length=3, max_length=200, description="Tiêu đề video và chủ đề")
+    script: str = Field(min_length=10, max_length=5000, description="Kịch bản/lời bình tiếng Việt")
+    mode: Literal["hybrid", "avatar", "cinematic", "motion"] = Field(
+        "hybrid",
+        description="Chế độ dựng: hybrid (Pexels + AI), avatar (HeyGen MC Lina), cinematic (Higgsfield Kling 3.0), motion (HyperFrames)",
+    )
+    aspect_ratio: Literal["9:16", "16:9"] = Field("9:16", description="Tỷ lệ khung hình: 9:16 (TikTok/Reels) hoặc 16:9")
+    enable_subtitles: bool = Field(True, description="Tự động nhận diện giọng nói và đục phụ đề động viền vàng kiểu TikTok")
+    auto_publish: bool = Field(False, description="Tự động đăng lên kênh TikTok sau khi hoàn tất")
+
+
 class AdsPerfIn(BaseModel):
     platform: Literal["meta", "google"]
     days: int = Field(30, ge=1, le=90)
@@ -484,6 +496,32 @@ def tiktok_upload_video_draft(args: TikTokDraftIn, rt: HubRuntime) -> dict[str, 
     return {"status": "staged_draft", "title": args.title, "privacy_level": args.privacy_level, "video_source": args.video_source}
 
 
+def video_produce_full_video(args: VideoProduceIn, rt: HubRuntime) -> dict[str, Any]:
+    from ..video.composer import VideoComposer, VideoProductionConfig
+    channels = ["tiktok"] if args.auto_publish else []
+    cfg = VideoProductionConfig(
+        title=args.title,
+        script=args.script,
+        mode=args.mode,
+        aspect_ratio=args.aspect_ratio,
+        enable_subtitles=args.enable_subtitles,
+        auto_publish_channels=channels,
+    )
+    composer = VideoComposer(rt.settings)
+    result = composer.produce(cfg)
+    return {
+        "status": "completed",
+        "title": result.title,
+        "video_path": result.video_path,
+        "duration": result.duration,
+        "resolution": result.resolution,
+        "blossom_url": result.blossom_url,
+        "social_status": result.social_status,
+        "technology_attribution": result.attribution.to_dict(),
+        "summary_report": result.summary_report,
+    }
+
+
 def ads_get_campaign_performance(args: AdsPerfIn, rt: HubRuntime) -> list[dict[str, Any]]:
     _live_connector(rt, "meta_ads" if args.platform == "meta" else "google_ads")
     if rt.mock:
@@ -696,6 +734,8 @@ CATALOG: list[tuple[ToolSpec, Any]] = [
            "Latest published TikTok videos with views, likes, comments, and shares."), tiktok_get_recent_videos),
     (_spec("tiktok.upload_video_draft", Impact.DRAFT, "tiktok", "upload_video_draft", TikTokDraftIn,
            "Stage or upload a video draft to TikTok inbox (never public)."), tiktok_upload_video_draft),
+    (_spec("video.produce_full_video", Impact.DRAFT, "multi", "produce_full_video", VideoProduceIn,
+           "Dây chuyền sản xuất video tự động đa phương thức: ElevenLabs voice, HeyGen/Higgsfield visual, Whisper kinetic subtitles, FFmpeg ducking & Blossom export kèm báo cáo công nghệ tích hợp."), video_produce_full_video),
     (_spec("ads.get_campaign_performance", Impact.READ, "meta_ads", "read_ad_metrics", AdsPerfIn,
            "Campaign spend/impressions/clicks/conversions."), ads_get_campaign_performance),
     (_spec("ads.launch_campaign", Impact.HIGH_IMPACT, "meta_ads", "launch_or_modify_campaign", LaunchCampaignIn,
