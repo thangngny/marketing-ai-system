@@ -38,6 +38,11 @@ _MOCKS: dict[str, list[dict[str, Any]]] = {
         {"type": "page", "url": "https://example.invalid/forwarding", "title": "MOCK Forwarding Landing Page"},
         {"type": "form_submission", "name": "MOCK Prospect", "email": "prospect@example.invalid"},
     ],
+    "tiktok": [
+        {"type": "channel", "name": "Buzz Marketing Hub", "followers": 2450, "likes": 18200, "videos": 12},
+        {"type": "video", "title": "Giới thiệu dịch vụ Logistics Minh Văn", "views": 15400, "likes": 1200, "comments": 85, "shares": 42},
+        {"type": "video_draft", "title": "Mẹo tối ưu chi phí vận tải biển 2026", "status": "draft_inbox"},
+    ],
 }
 
 

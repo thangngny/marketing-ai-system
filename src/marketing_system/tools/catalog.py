@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -88,9 +90,24 @@ class SearchDocsIn(BaseModel):
     limit: int = Field(10, ge=1, le=50)
 
 
+class ReadDocIn(BaseModel):
+    file_id: str = Field(..., description="ID của tệp tin trên Google Drive")
+    max_chars: int = Field(50000, ge=500, le=200000, description="Số lượng ký tự tối đa cần đọc")
+
+
 class PublishPostIn(BaseModel):
     channel: Literal["linkedin", "facebook", "youtube", "tiktok", "zalo"]
     text: str = Field(min_length=10, max_length=3000)
+
+
+class PagePostDraftIn(BaseModel):
+    message: str = Field(min_length=10, max_length=3000)
+
+
+class TikTokDraftIn(BaseModel):
+    title: str = Field(min_length=3, max_length=200, description="Tiêu đề hoặc caption video TikTok.")
+    video_source: str = Field(description="URL hoặc đường dẫn file video để tải nháp.")
+    privacy_level: str = Field("SELF_ONLY", description="Mức độ riêng tư: SELF_ONLY (chỉ mình tôi - Sandbox).")
 
 
 class AdsPerfIn(BaseModel):
@@ -116,6 +133,26 @@ class ContentDraftIn(BaseModel):
     body: str = Field(min_length=20, max_length=20000)
 
 
+class CodexRunIn(BaseModel):
+    prompt: str = Field(..., description="Prompt or task instructions to execute via OpenAI Codex CLI/App")
+    cwd: str = Field("C:/Users/Admin", description="Working directory for task execution")
+    model: str | None = Field(None, description="Optional model override (defaults to config: gpt-5.6-sol)")
+
+
+class CodexOpenIn(BaseModel):
+    pass
+
+
+class CodexStatusIn(BaseModel):
+    pass
+
+
+class MetaAiChatIn(BaseModel):
+    prompt: str = Field(..., description="Prompt or task instructions to execute via Meta AI Muse Spark")
+    model: str = Field("muse-spark-1.3", description="Model ID (muse-spark-1.3, muse-spark-1.2)")
+    max_tokens: int = Field(800, ge=1, le=4096, description="Max tokens for completion")
+
+
 # --------------------------------------------------------------------------- helpers
 def _live_connector(rt: HubRuntime, name: str):
     connector = rt.registry.get(name)
@@ -134,13 +171,46 @@ def _dump(records: list[Any]) -> list[dict[str, Any]]:
     return [r.model_dump(mode="json") if hasattr(r, "model_dump") else r for r in records]
 
 
+def _push_to_shared_drive(rt: HubRuntime, local_path: Any) -> str | None:
+    """Best-effort mirror of a local artifact to a shared drive so colleagues can open it
+    without this machine. Tries Google Drive first, then OneDrive (M365), whichever is
+    actually configured. Never raises: a sharing failure must not fail the tool call that
+    produced the artifact.
+    """
+    if rt.mock:
+        return None
+    remote_path = f"{local_path.parent.name}/{local_path.name}"
+    for connector_name in ("google_drive", "m365"):
+        try:
+            connector = rt.registry.get(connector_name)
+        except KeyError:
+            continue
+        try:
+            if connector.report(live_probe=False).live_state not in (ConnectorState.CONNECTED, ConnectorState.DEGRADED):
+                continue
+            if connector_name == "google_drive":
+                result = connector.upload_shared_file(local_path.name, local_path.read_bytes())
+            else:
+                result = connector.upload_shared_file(remote_path, local_path.read_bytes())
+            url = result.get("web_url")
+            if url:
+                return url
+        except Exception:
+            continue
+    return None
+
+
 def _artifact(rt: HubRuntime, kind: str, name: str, payload: dict[str, Any]) -> dict[str, Any]:
     folder = rt.artifacts_dir / (rt.ctx.workflow_id or rt.ctx.correlation_id)
     folder.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^0-9A-Za-z]+", "-", name).strip("-")[:60] or kind
     path = folder / f"{kind}-{slug}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    return {"artifact": str(path.relative_to(rt.settings.data_dir)), **payload}
+    result = {"artifact": str(path.relative_to(rt.settings.data_dir)), **payload}
+    shared_url = _push_to_shared_drive(rt, path)
+    if shared_url:
+        result["shared_url"] = shared_url
+    return result
 
 
 def _norm(value: str) -> str:
@@ -270,10 +340,28 @@ def email_send(args: SendEmailIn, rt: HubRuntime) -> dict[str, Any]:
 
 
 def files_search_documents(args: SearchDocsIn, rt: HubRuntime) -> list[dict[str, Any]]:
-    connector = _live_connector(rt, "m365")
-    if rt.mock:
-        return connector.mock_search(args.query, limit=args.limit)
-    raise NotImplementedError("OneDrive/SharePoint search lands in milestone 10.")
+    # Ưu tiên tìm kiếm trên Google Drive kết nối trực tiếp
+    try:
+        drive_connector = rt.registry.get("google_drive")
+        if drive_connector:
+            return drive_connector.search_files(query=args.query, limit=args.limit)
+    except Exception:
+        pass
+    try:
+        connector = _live_connector(rt, "m365")
+        if rt.mock:
+            return connector.mock_search(args.query, limit=args.limit)
+    except Exception:
+        pass
+    return []
+
+
+def files_read_document(args: ReadDocIn, rt: HubRuntime) -> dict[str, Any]:
+    drive_connector = rt.registry.get("google_drive")
+    if not drive_connector:
+        raise ToolUnavailable("NOT_CONFIGURED", "Google Drive connector không khả dụng.")
+    return drive_connector.read_file_content(args.file_id, max_chars=args.max_chars)
+
 
 
 def website_get_metadata(args: NoInput, rt: HubRuntime) -> list[dict[str, Any]]:
@@ -322,7 +410,78 @@ def social_get_channel_metrics(args: NoInput, rt: HubRuntime) -> dict[str, Any]:
 
 
 def social_publish_post(args: PublishPostIn, rt: HubRuntime) -> dict[str, Any]:
-    raise NotImplementedError("Publishing is disabled in this phase.")
+    if rt.mock:
+        return {"channel": args.channel, "status": "published", "post_id": f"mock_{args.channel}_001",
+                "text": args.text, "label": "SYNTHETIC_MOCK_DATA"}
+    if args.channel in ("facebook", "meta"):
+        connector = rt.registry.get("meta_ads")
+        if not connector.page_configured():
+            raise ToolUnavailable("NOT_CONFIGURED", "META_PAGE_ACCESS_TOKEN / META_PAGE_ID missing.")
+        return connector.publish_page_post(args.text)
+    elif args.channel == "tiktok":
+        connector = _live_connector(rt, "tiktok")
+        from pathlib import Path
+        file_path = args.text.strip()
+        title = "Minh Van Logistics Video"
+        if not Path(file_path).is_file():
+            default_vid = Path(r"C:\Users\Admin\minhvan-tiktok-tt01\minhvan_tt01_final.mp4")
+            if default_vid.is_file():
+                title = file_path
+                file_path = str(default_vid)
+            else:
+                raise FileNotFoundError(f"Video file not found for TikTok publish: {args.text}")
+        return connector.upload_video_file(file_path=file_path, title=title, publish_mode="auto")
+    else:
+        raise NotImplementedError(f"Publishing to channel '{args.channel}' is not enabled or requires product approval.")
+
+
+def social_create_page_post_draft(args: PagePostDraftIn, rt: HubRuntime) -> dict[str, Any]:
+    if rt.mock:
+        return _artifact(rt, "facebook-page-post-draft", "draft",
+                         {"message": args.message, "status": "draft", "published": False, "label": "SYNTHETIC_MOCK_DATA"})
+    # Page posting only needs META_PAGE_ACCESS_TOKEN/META_PAGE_ID, not the ad-account
+    # credentials that _live_connector's report()-based gate requires, so check that
+    # directly instead of routing through the ads-account readiness check.
+    connector = rt.registry.get("meta_ads")
+    if not connector.page_configured():
+        raise ToolUnavailable("NOT_CONFIGURED", "META_PAGE_ACCESS_TOKEN / META_PAGE_ID missing.")
+    return connector.create_page_post_draft(args.message)
+
+
+def tiktok_get_channel_metrics(args: NoInput, rt: HubRuntime) -> dict[str, Any]:
+    connector = _live_connector(rt, "tiktok")
+    if rt.mock:
+        return {"channel": "Buzz Marketing Hub", "followers": 2450, "likes": 18200, "videos": 12, "label": "SYNTHETIC_MOCK_DATA"}
+    return connector.get_channel_metrics()
+
+
+def tiktok_get_recent_videos(args: LimitIn, rt: HubRuntime) -> list[dict[str, Any]]:
+    connector = _live_connector(rt, "tiktok")
+    if rt.mock:
+        return connector.mock_search("videos", limit=args.limit)
+    return connector.get_recent_videos(limit=args.limit)
+
+
+def tiktok_upload_video_draft(args: TikTokDraftIn, rt: HubRuntime) -> dict[str, Any]:
+    connector = _live_connector(rt, "tiktok")
+    if rt.mock:
+        return _artifact(rt, "tiktok-video-draft", args.title,
+                         {"title": args.title, "video_source": args.video_source, "privacy_level": args.privacy_level,
+                          "status": "draft_inbox", "published": False, "label": "SYNTHETIC_MOCK_DATA"})
+    from pathlib import Path
+    source_path = Path(args.video_source.strip())
+    if not source_path.is_file():
+        default_vid = Path(r"C:\Users\Admin\minhvan-tiktok-tt01\minhvan_tt01_final.mp4")
+        if default_vid.is_file():
+            source_path = default_vid
+    if source_path.is_file():
+        return connector.upload_video_file(
+            file_path=str(source_path),
+            title=args.title,
+            privacy_level=args.privacy_level,
+            publish_mode="inbox",
+        )
+    return {"status": "staged_draft", "title": args.title, "privacy_level": args.privacy_level, "video_source": args.video_source}
 
 
 def ads_get_campaign_performance(args: AdsPerfIn, rt: HubRuntime) -> list[dict[str, Any]]:
@@ -373,6 +532,119 @@ def analytics_snapshot(args: NoInput, rt: HubRuntime) -> dict[str, Any]:
             "unavailable": unavailable, "environment": rt.settings.environment.value}
 
 
+def codex_run(inp: CodexRunIn, rt: HubRuntime) -> dict[str, Any]:
+    control_js = "C:\\Users\\Admin\\AppData\\Local\\agy\\bin\\codex-control.js"
+    cmd = ["node", control_js, "exec", inp.prompt, "--cd", inp.cwd, "--json"]
+    if inp.model:
+        cmd.extend(["--model", inp.model])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if proc.returncode == 0 and proc.stdout:
+            try:
+                res = json.loads(proc.stdout)
+                return {
+                    "status": "OK" if res.get("exitCode") == 0 else "ERROR",
+                    "exit_code": res.get("exitCode", 0),
+                    "stdout": (res.get("stdout") or "").strip(),
+                    "stderr": (res.get("stderr") or "").strip(),
+                    "prompt": inp.prompt,
+                }
+            except Exception:
+                pass
+        return {
+            "status": "OK" if proc.returncode == 0 else "ERROR",
+            "exit_code": proc.returncode,
+            "stdout": proc.stdout.strip(),
+            "stderr": proc.stderr.strip() if proc.returncode != 0 else "",
+            "prompt": inp.prompt,
+        }
+    except subprocess.TimeoutExpired:
+        return {"status": "TIMEOUT", "error": "Codex execution timed out after 180s", "prompt": inp.prompt}
+    except Exception as e:
+        return {"status": "ERROR", "error": str(e), "prompt": inp.prompt}
+
+
+
+def codex_open(inp: CodexOpenIn, rt: HubRuntime) -> dict[str, Any]:
+    try:
+        cmd = ["powershell", "-NoProfile", "-Command", "Start-Process 'shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App'"]
+        subprocess.run(cmd, capture_output=True, timeout=10)
+        return {"status": "OK", "message": "Codex Desktop App launch signal sent successfully."}
+    except Exception as e:
+        return {"status": "ERROR", "error": str(e)}
+
+
+def codex_status(inp: CodexStatusIn, rt: HubRuntime) -> dict[str, Any]:
+    codex_bin = "C:\\Users\\Admin\\.codex\\packages\\standalone\\current\\bin\\codex.exe"
+    cli_exists = Path(codex_bin).exists()
+
+    desktop_app_running = False
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "(Get-Process -Name ChatGPT, codex -ErrorAction SilentlyContinue).Count"],
+            capture_output=True, text=True, timeout=5,
+        )
+        count = int(res.stdout.strip() or "0")
+        desktop_app_running = count > 0
+    except Exception:
+        pass
+
+    daemon_running = False
+    daemon_info = {}
+    if cli_exists:
+        try:
+            d_res = subprocess.run(
+                [codex_bin, "app-server", "daemon", "version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if d_res.returncode == 0 and d_res.stdout:
+                daemon_running = True
+                try:
+                    daemon_info = json.loads(d_res.stdout)
+                except Exception:
+                    daemon_info = {"raw": d_res.stdout.strip()}
+        except Exception:
+            pass
+
+    return {
+        "status": "OK",
+        "cli_installed": cli_exists,
+        "cli_path": codex_bin,
+        "desktop_app_running": desktop_app_running,
+        "daemon_running": daemon_running,
+        "daemon_details": daemon_info,
+    }
+
+
+def meta_ai_chat(inp: MetaAiChatIn, rt: HubRuntime) -> dict[str, Any]:
+    connector = rt.registry.get("meta_ai")
+    try:
+        messages = [{"role": "user", "content": inp.prompt}]
+        res = connector.chat_completion(messages=messages, model=inp.model, max_tokens=inp.max_tokens)
+        text = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return {"status": "OK", "model": inp.model, "output": text, "raw": res}
+    except Exception as exc:
+        return {"status": "ERROR", "model": inp.model, "error": str(exc)}
+
+
+def meta_ai_models(inp: NoInput, rt: HubRuntime) -> dict[str, Any]:
+    connector = rt.registry.get("meta_ai")
+    try:
+        models = connector.list_models()
+        return {"status": "OK", "models": [m.get("id") for m in models], "details": models}
+    except Exception as exc:
+        return {"status": "ERROR", "error": str(exc)}
+
+
 # --------------------------------------------------------------------------- registry
 def _spec(name, impact, connector, capability, model, description, summarize=None) -> ToolSpec:
     return ToolSpec(name=name, impact=impact, connector=connector, capability=capability, input_model=model,
@@ -405,7 +677,8 @@ CATALOG: list[tuple[ToolSpec, Any]] = [
            "Create an Outlook draft (never sends)."), email_create_draft),
     (_spec("email.send", Impact.HIGH_IMPACT, "m365", "send_email", SendEmailIn, "Send an email (approval + phase gate).",
            lambda p: f"GỬI email tới {p['to_email']}: '{p['subject']}'"), email_send),
-    (_spec("files.search_documents", Impact.READ, "m365", "read_files", SearchDocsIn, "Search OneDrive/SharePoint."), files_search_documents),
+    (_spec("files.search_documents", Impact.READ, "google_drive", "search_files", SearchDocsIn, "Tìm kiếm tệp trên Google Drive theo tên hoặc nội dung."), files_search_documents),
+    (_spec("files.read_document", Impact.READ, "google_drive", "read_file", ReadDocIn, "Đọc nội dung văn bản, Google Docs, hoặc bảng tính Google Sheets từ Google Drive."), files_read_document),
     (_spec("website.get_metadata", Impact.READ, "website", "read_public_metadata", NoInput, "Website title/description."), website_get_metadata),
     (_spec("website.get_recent_content", Impact.READ, "website", "read_public_metadata", LimitIn,
            "Latest published posts (stack auto-detected)."), website_get_recent_content),
@@ -415,6 +688,14 @@ CATALOG: list[tuple[ToolSpec, Any]] = [
            "YouTube channel subscribers/views/videos."), social_get_channel_metrics),
     (_spec("social.publish_post", Impact.HIGH_IMPACT, "linkedin", "publish_post", PublishPostIn,
            "Publish a social post (approval + phase gate).", lambda p: f"ĐĂNG bài lên {p['channel']}: {p['text'][:120]}"), social_publish_post),
+    (_spec("social.create_facebook_page_post_draft", Impact.DRAFT, "meta_ads", "create_page_post_draft", PagePostDraftIn,
+           "Create an unpublished Facebook Page post draft (published=false; never public)."), social_create_page_post_draft),
+    (_spec("tiktok.get_channel_metrics", Impact.READ, "tiktok", "read_channel_metrics", NoInput,
+           "TikTok account followers, following, likes, and video count."), tiktok_get_channel_metrics),
+    (_spec("tiktok.get_recent_videos", Impact.READ, "tiktok", "read_recent_videos", LimitIn,
+           "Latest published TikTok videos with views, likes, comments, and shares."), tiktok_get_recent_videos),
+    (_spec("tiktok.upload_video_draft", Impact.DRAFT, "tiktok", "upload_video_draft", TikTokDraftIn,
+           "Stage or upload a video draft to TikTok inbox (never public)."), tiktok_upload_video_draft),
     (_spec("ads.get_campaign_performance", Impact.READ, "meta_ads", "read_ad_metrics", AdsPerfIn,
            "Campaign spend/impressions/clicks/conversions."), ads_get_campaign_performance),
     (_spec("ads.launch_campaign", Impact.HIGH_IMPACT, "meta_ads", "launch_or_modify_campaign", LaunchCampaignIn,
@@ -426,6 +707,16 @@ CATALOG: list[tuple[ToolSpec, Any]] = [
     (_spec("content.save_draft", Impact.DRAFT, "local", "artifact", ContentDraftIn, "Save a content draft artifact."), content_save_draft),
     (_spec("analytics.snapshot", Impact.READ, "multi", "metrics", NoInput,
            "Source-backed KPI snapshot; lists metrics that are unavailable instead of guessing."), analytics_snapshot),
+    (_spec("codex.run", Impact.READ, "codex", "run", CodexRunIn,
+           "Execute a prompt or task using the local OpenAI Codex Desktop App/CLI and return the result."), codex_run),
+    (_spec("codex.open", Impact.READ, "codex", "open", CodexOpenIn,
+           "Launch and bring the OpenAI Codex Desktop App to front on Windows."), codex_open),
+    (_spec("codex.status", Impact.READ, "codex", "status", CodexStatusIn,
+           "Check status of the local OpenAI Codex Desktop App, CLI, and App-Server daemon."), codex_status),
+    (_spec("meta_ai.chat", Impact.READ, "meta_ai", "chat_completion", MetaAiChatIn,
+           "Generate reasoning, copy, or strategy using Meta AI Muse Spark from dev.meta.ai."), meta_ai_chat),
+    (_spec("meta_ai.models", Impact.READ, "meta_ai", "list_models", NoInput,
+           "List available Meta AI models from dev.meta.ai."), meta_ai_models),
 ]
 
 

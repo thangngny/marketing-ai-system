@@ -1,0 +1,195 @@
+{
+  "$defs": {
+    "ExecutionMode": {
+      "enum": [
+        "ANALYZE_ONLY",
+        "PLAN_ONLY",
+        "REPRODUCE_SAFE",
+        "REPRODUCE_FULL"
+      ],
+      "title": "ExecutionMode",
+      "type": "string"
+    },
+    "ReproductionStep": {
+      "properties": {
+        "step_id": {
+          "title": "Step Id",
+          "type": "integer"
+        },
+        "observed_video_step": {
+          "title": "Observed Video Step",
+          "type": "string"
+        },
+        "verified_current_step": {
+          "title": "Verified Current Step",
+          "type": "string"
+        },
+        "command_or_action": {
+          "title": "Command Or Action",
+          "type": "string"
+        },
+        "translated_windows_command": {
+          "default": "",
+          "title": "Translated Windows Command",
+          "type": "string"
+        },
+        "files_changed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files Changed",
+          "type": "array"
+        },
+        "risk_level": {
+          "$ref": "#/$defs/RiskLevel",
+          "default": "LOW"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "rollback_plan": {
+          "default": "",
+          "title": "Rollback Plan",
+          "type": "string"
+        },
+        "expected_result": {
+          "default": "",
+          "title": "Expected Result",
+          "type": "string"
+        },
+        "execution_status": {
+          "default": "PENDING",
+          "title": "Execution Status",
+          "type": "string"
+        },
+        "actual_result": {
+          "default": "",
+          "title": "Actual Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "observed_video_step",
+        "verified_current_step",
+        "command_or_action"
+      ],
+      "title": "ReproductionStep",
+      "type": "object"
+    },
+    "RiskLevel": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "DESTRUCTIVE"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    },
+    "VerificationItem": {
+      "properties": {
+        "component": {
+          "title": "Component",
+          "type": "string"
+        },
+        "video_version": {
+          "default": "unknown",
+          "title": "Video Version",
+          "type": "string"
+        },
+        "current_version": {
+          "default": "unknown",
+          "title": "Current Version",
+          "type": "string"
+        },
+        "is_compatible": {
+          "default": true,
+          "title": "Is Compatible",
+          "type": "boolean"
+        },
+        "is_outdated": {
+          "default": false,
+          "title": "Is Outdated",
+          "type": "boolean"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "action_recommendation": {
+          "default": "",
+          "title": "Action Recommendation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component"
+      ],
+      "title": "VerificationItem",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "source_url": {
+      "title": "Source Url",
+      "type": "string"
+    },
+    "demo_objective": {
+      "title": "Demo Objective",
+      "type": "string"
+    },
+    "demo_architecture": {
+      "default": "",
+      "title": "Demo Architecture",
+      "type": "string"
+    },
+    "target_os": {
+      "default": "windows",
+      "title": "Target Os",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/ExecutionMode",
+      "default": "PLAN_ONLY"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/ReproductionStep"
+      },
+      "title": "Steps",
+      "type": "array"
+    },
+    "verifications": {
+      "items": {
+        "$ref": "#/$defs/VerificationItem"
+      },
+      "title": "Verifications",
+      "type": "array"
+    },
+    "approval_state": {
+      "default": "PENDING",
+      "title": "Approval State",
+      "type": "string"
+    },
+    "overall_status": {
+      "default": "PLAN_READY",
+      "title": "Overall Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "source_url",
+    "demo_objective"
+  ],
+  "title": "ReproductionPlan",
+  "type": "object"
+}

@@ -1,0 +1,7 @@
+WEBVTT
+
+00:00.000 --> 00:02.500
+Welcome to the quick tutorial on installing our new tool.
+
+00:02.500 --> 00:05.000
+Run pip install uv to get started.

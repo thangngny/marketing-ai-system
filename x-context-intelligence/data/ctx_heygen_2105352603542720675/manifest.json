@@ -1,0 +1,184 @@
+{
+  "job_id": "ctx_HeyGen_2105352603542720675",
+  "url": "https://x.com/HeyGen/status/2105352603542720675",
+  "canonical_url": "https://x.com/HeyGen/status/2105352603542720675",
+  "fetched_at": "2026-10-01T09:05:59.820680+00:00",
+  "root": {
+    "id": "2105352603542720675",
+    "url": "https://x.com/HeyGen/status/2105352603542720675",
+    "author": {
+      "id": null,
+      "name": "HeyGen",
+      "handle": "HeyGen",
+      "avatar_url": null,
+      "verified": false,
+      "description": null
+    },
+    "text": "We're releasing HeyGen Video, built for businesses that need production-quality video without production-level costs.\n\nPricing starts at $0.01/s through October (50% off)\n\nBuilt on @Minimax_AI H3, post-trained by HeyGen.\n\nLearn more: https://developers.heygen.com/heygen-video-1.0-catalog",
+    "created_at": "Wed Sep 30 17:42:30 +0000 2026",
+    "likes": 1615,
+    "retweets": 459,
+    "replies_count": 603,
+    "quotes_count": 0,
+    "bookmarks_count": 0,
+    "views": 888478,
+    "media": [
+      {
+        "media_id": null,
+        "type": "video",
+        "url": "https://video.twimg.com/amplify_video/2105352541278195712/vid/avc1/1920x1080/AVFG8gJI1pPJfMuo.mp4?tag=29",
+        "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2105352541278195712/img/Hktf9jOFqVkE1iJr.jpg",
+        "duration_seconds": 37.632,
+        "width": 1920,
+        "height": 1080,
+        "local_path": null,
+        "video_job_id": "job_c99fbd29e054",
+        "summary": "Video transcribed: 5 segments. Duration: 37.6s.",
+        "transcription_text": "What if you could generate video like this? Every shot with its own sound. Or what if your business needs production quality video without production level costs? Hey Jen video. Available via API."
+      }
+    ],
+    "links": [
+      {
+        "url": "https://developers.heygen.com/heygen-video-1.0-catalog",
+        "expanded_url": "https://developers.heygen.com/heygen-video-1.0-catalog",
+        "title": "HeyGen Video - Prompt to Video API",
+        "description": "HeyGen Video generates a whole scene from a prompt: subject, setting and sound in one call. See the launch films clip by clip, in four styles, with the prompt behind every shot.",
+        "domain": "developers.heygen.com",
+        "resolved": true,
+        "http_status": 200,
+        "repo_info": null
+      }
+    ],
+    "is_thread": false,
+    "thread_posts": []
+  },
+  "author_followups": [],
+  "top_replies": [],
+  "quotes": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "author_HeyGen",
+        "label": "@HeyGen (HeyGen)",
+        "type": "AUTHOR",
+        "properties": {
+          "name": "HeyGen",
+          "handle": "HeyGen",
+          "verified": false
+        }
+      },
+      {
+        "id": "post_2105352603542720675",
+        "label": "Root Post 2105352603542720675",
+        "type": "ROOT_POST",
+        "properties": {
+          "url": "https://x.com/HeyGen/status/2105352603542720675",
+          "text": "We're releasing HeyGen Video, built for businesses that need production-quality video without production-level costs.\n\nP...",
+          "likes": 1615,
+          "retweets": 459,
+          "replies_count": 603
+        }
+      },
+      {
+        "id": "media_2105352603542720675_0",
+        "label": "VIDEO (1920x1080)",
+        "type": "MEDIA",
+        "properties": {
+          "type": "video",
+          "url": "https://video.twimg.com/amplify_video/2105352541278195712/vid/avc1/1920x1080/AVFG8gJI1pPJfMuo.mp4?tag=29",
+          "duration": 37.632,
+          "summary": "Video transcribed: 5 segments. Duration: 37.6s."
+        }
+      },
+      {
+        "id": "link_2105352603542720675_0",
+        "label": "HeyGen Video - Prompt to Video API",
+        "type": "LINK",
+        "properties": {
+          "url": "https://developers.heygen.com/heygen-video-1.0-catalog",
+          "domain": "developers.heygen.com",
+          "resolved": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "author_HeyGen",
+        "target": "post_2105352603542720675",
+        "relation": "AUTHORED",
+        "properties": {}
+      },
+      {
+        "source": "post_2105352603542720675",
+        "target": "media_2105352603542720675_0",
+        "relation": "CONTAINS_MEDIA",
+        "properties": {}
+      },
+      {
+        "source": "post_2105352603542720675",
+        "target": "link_2105352603542720675_0",
+        "relation": "LINKS_TO",
+        "properties": {}
+      }
+    ]
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "replies_reported": 603,
+    "replies_retrieved": 0,
+    "author_replies_retrieved": 0,
+    "quotes_reported": 0,
+    "quotes_retrieved": 0,
+    "media_reported": 1,
+    "media_retrieved": 1,
+    "external_links_count": 1,
+    "external_links_resolved": 1,
+    "resolver_used": "FXTWITTER_API",
+    "truncation_reasons": [
+      "Browser worker notice: Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE at https://x.com/HeyGen/status/2105352603542720675\nCall log:\n  - navigating to \"https://x.com/HeyGen/status/2105352603542720675\", waiting until \"domcontentloaded\"\n",
+      "Conversation replies require browser authentication or extended scroll"
+    ],
+    "notes": "Retrieved 0/603 replies (0 author follow-ups). 1/1 media items processed. 1/1 external links resolved."
+  },
+  "summary": {
+    "title": "Post by @HeyGen",
+    "objective": "We're releasing HeyGen Video, built for businesses that need production-quality video without production-level costs.\n\nPricing starts at $0.",
+    "media_types": [
+      "video"
+    ],
+    "replies_analyzed": 0,
+    "author_followup_count": 0,
+    "external_links": 1,
+    "coverage_status": "PARTIAL"
+  },
+  "reproduction_plan": {
+    "job_id": "ctx_HeyGen_2105352603542720675",
+    "url": "https://x.com/HeyGen/status/2105352603542720675",
+    "demo_objective": "We're releasing HeyGen Video, built for businesses that need production-quality video without produc",
+    "prerequisites": [
+      "Python",
+      "Chrome"
+    ],
+    "environment_variables": {},
+    "steps": [
+      {
+        "step_number": 1,
+        "name": "Verify Prerequisites & Local Runtime",
+        "objective": "Check if required runtime environments are available",
+        "source_classification": "INFERRED",
+        "original_command": null,
+        "windows_command": "Get-Command node, python, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' -ErrorAction SilentlyContinue",
+        "verification_command": "python --version",
+        "risk_level": "LOW",
+        "requires_approval": false,
+        "status": "PLANNED"
+      }
+    ],
+    "gap_analysis": {},
+    "validation_criteria": [
+      "Prerequisites verified",
+      "Safe execution only"
+    ],
+    "mode": "PLAN_ONLY"
+  }
+}

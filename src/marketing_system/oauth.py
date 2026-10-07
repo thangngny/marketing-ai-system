@@ -69,12 +69,18 @@ class _CallbackServer(ThreadingHTTPServer):
     callback: dict[str, str] | None = None
 
 
-def _capture_callback(auth_url: str, *, port: int = 0, timeout: int = 300) -> tuple[dict[str, str], str]:
+def _capture_callback(auth_url: str, *, port: int = 0, timeout: int = 7200) -> tuple[dict[str, str], str]:
     server = _CallbackServer(("127.0.0.1", port), _CallbackHandler)
     server.timeout = timeout
     actual_port = server.server_address[1]
     redirect_uri = f"http://localhost:{actual_port}"
     url = auth_url.replace("REDIRECT_URI_PLACEHOLDER", urllib.parse.quote(redirect_uri, safe=""))
+    print(f"Opening browser for authorization:\n{url}\nListening on {redirect_uri} (timeout {timeout}s / {timeout//60} mins)...", flush=True)
+    try:
+        import subprocess
+        subprocess.Popen(f'start "" "{url}"', shell=True)
+    except Exception:
+        pass
     webbrowser.open(url, new=2)
     # Browsers send stray requests (favicon, prefetch) first; wait for the one carrying code/error.
     deadline = time.monotonic() + timeout
@@ -175,3 +181,54 @@ def authorize_zoho() -> dict[str, str]:
     if body.get("api_domain"):
         write_credential("ZOHO_API_DOMAIN", str(body["api_domain"]))
     return {"provider": "zoho", "state": "CREDENTIAL_STORED", "scope": ZOHO_SCOPES}
+
+
+TIKTOK_SCOPES = "user.info.basic,video.upload,video.publish"
+
+
+def authorize_tiktok() -> dict[str, str]:
+    client_key = _value("TIKTOK_CLIENT_KEY")
+    client_secret = _value("TIKTOK_CLIENT_SECRET")
+    verifier, challenge = _pkce()
+    state = secrets.token_urlsafe(32)
+    fixed_port = 53682
+    params = {
+        "client_key": client_key,
+        "scope": TIKTOK_SCOPES,
+        "response_type": "code",
+        "redirect_uri": "REDIRECT_URI_PLACEHOLDER",
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    auth_url = f"https://www.tiktok.com/v2/auth/authorize/?{urllib.parse.urlencode(params)}"
+    callback, redirect_uri = _capture_callback(auth_url, port=fixed_port)
+    if callback.get("state") != state:
+        raise RuntimeError("OAuth state validation failed")
+    if callback.get("error"):
+        raise RuntimeError(f"TikTok authorization failed: {callback.get('error_description') or callback['error']}")
+    token = httpx.post(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "client_key": client_key,
+            "client_secret": client_secret,
+            "code": callback["code"],
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+        },
+        timeout=30.0,
+    )
+    token.raise_for_status()
+    body = token.json()
+    data = body.get("data") or {}
+    if not data.get("refresh_token"):
+        raise RuntimeError(f"TikTok returned no refresh token: {body}")
+    write_credential("TIKTOK_REFRESH_TOKEN", str(data["refresh_token"]))
+    if data.get("access_token"):
+        write_credential("TIKTOK_ACCESS_TOKEN", str(data["access_token"]))
+    if data.get("open_id"):
+        write_credential("TIKTOK_OPEN_ID", str(data["open_id"]))
+    return {"provider": "tiktok", "state": "CREDENTIAL_STORED", "scope": TIKTOK_SCOPES}
+

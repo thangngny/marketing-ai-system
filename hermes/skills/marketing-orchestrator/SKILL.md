@@ -22,7 +22,7 @@ Use for every Buzz marketing request and every system-status question.
 
 ## Prerequisites
 
-MCP server `marketing-system` exposes `marketing_handle_request`, `marketing_system_overview`, the namespaced tool hub (`crm_*`, `prospecting_*`, `email_*`, `files_*`, `website_*`, `social_*`, `ads_*`, `content_*`, `analytics_*`, `system_*`) and `workflow_*` / `approval_status`.
+MCP server `marketing-system` exposes `marketing_handle_request`, `marketing_system_overview`, the namespaced tool hub (`crm_*`, `prospecting_*`, `email_*`, `files_*`, `website_*`, `social_*`, `tiktok_*`, `ads_*`, `content_*`, `analytics_*`, `system_*`, `codex_*`) and `workflow_*` / `approval_status`.
 
 ## Procedure
 

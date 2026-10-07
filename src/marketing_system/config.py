@@ -36,7 +36,8 @@ class Settings(BaseModel):
         if env_file:
             load_dotenv(env_file, override=False)
         else:
-            load_dotenv(PROJECT_ROOT / ".env.local", override=False)
+            load_dotenv(PROJECT_ROOT / ".env", override=False)
+            load_dotenv(PROJECT_ROOT / ".env.local", override=True)
         return cls(
             environment=os.getenv("MARKETING_ENVIRONMENT", "mock").lower(),
             safe_dry_run=os.getenv("MARKETING_SAFE_DRY_RUN", "true"),

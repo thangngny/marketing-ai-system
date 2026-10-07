@@ -25,6 +25,8 @@ class M365Connector(BaseConnector):
             Capability(name="read_files", impact=Impact.READ, note="Live normalization is not enabled yet."),
             Capability(name="create_email_draft", impact=Impact.DRAFT),
             Capability(name="send_email", impact=Impact.HIGH_IMPACT, available_in_mock=False, note="Explicit approval required."),
+            Capability(name="upload_shared_file", impact=Impact.DRAFT,
+                       note="Uploads an artifact to OneDrive and creates an org-visible view link."),
         ]
 
     def _access_token(self) -> str:
@@ -39,7 +41,7 @@ class M365Connector(BaseConnector):
             "client_id": self.env("MS_CLIENT_ID"),
             "grant_type": "refresh_token",
             "refresh_token": self.env("MS_REFRESH_TOKEN"),
-            "scope": "openid profile offline_access User.Read Mail.Read Calendars.Read Files.Read",
+            "scope": "openid profile offline_access User.Read Mail.Read Calendars.Read Files.ReadWrite",
         }
         if self.env("MS_CLIENT_SECRET"):
             data["client_secret"] = self.env("MS_CLIENT_SECRET")
@@ -64,6 +66,35 @@ class M365Connector(BaseConnector):
             timeout=15.0,
         )
         return response.is_success, f"Microsoft Graph /me probe returned HTTP {response.status_code}."
+
+    def upload_shared_file(self, remote_path: str, content: bytes) -> dict[str, Any]:
+        """Upload a small (<4MB) artifact to the connected account's OneDrive and return an
+        organization-visible view link, so colleagues can open it without touching this machine.
+
+        Path is created under /BuzzMarketingHub/... automatically; callers pass the part after that.
+        """
+        token = self._access_token()
+        full_path = f"BuzzMarketingHub/{remote_path.lstrip('/')}"
+        response = self.request(
+            "PUT",
+            f"https://graph.microsoft.com/v1.0/me/drive/root:/{full_path}:/content",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
+            content=content,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        item = response.json()
+        web_url = item.get("webUrl")
+        link_response = self.request(
+            "POST",
+            f"https://graph.microsoft.com/v1.0/me/drive/items/{item['id']}/createLink",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"type": "view", "scope": "organization"},
+            timeout=20.0,
+        )
+        if link_response.is_success:
+            web_url = (link_response.json().get("link") or {}).get("webUrl", web_url)
+        return {"item_id": item.get("id"), "web_url": web_url, "path": full_path}
 
     def read(self, resource: str, **kwargs: Any) -> list[Any]:
         if self.settings.environment.value == "mock":

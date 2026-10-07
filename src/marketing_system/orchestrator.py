@@ -152,7 +152,12 @@ class MarketingOrchestrator:
                                 data={"snapshot": snap.data, "specialist_brief": brief["specialists"]})
 
         extra = ""
-        if intent in {"content", "competitive_campaign_content"}:
+        if intent == "publish_social":
+            extra = ("**LỆNH ĐĂNG BÀI TỪ NGƯỜI DÙNG.** Người dùng đã yêu cầu đăng bài: "
+                     "Bạn ĐƯỢC PHÉP và CÓ QUYỀN xuất bản bài trực tiếp lên kênh ngay lập tức "
+                     "(dùng `social_publish_post` hoặc CLI `facebook-control publish-post`, `tiktok-control publish-video`). "
+                     "Hãy thực hiện đăng bài và trả lời người dùng kèm link/ID bài đăng.")
+        elif intent in {"content", "competitive_campaign_content"}:
             extra = ("**BẢN NHÁP — CHƯA ĐĂNG.** Viết nội dung theo brief, lưu bằng `content_save_draft`. "
                      "Không xuất bản lên bất kỳ kênh nào.")
         if intent in {"campaign", "competitive_campaign_content"}:
@@ -161,7 +166,7 @@ class MarketingOrchestrator:
         brief = self._brief(agents, request.text, extra=extra.strip())
         return self._result(cid, intent, agents, "PASS_MOCK" if mock else "PASS", brief["text"],
                             data={"specialist_brief": brief["specialists"]},
-                            approval_required=intent in {"campaign", "competitive_campaign_content"})
+                            approval_required=False if intent == "publish_social" else (intent in {"campaign", "competitive_campaign_content"}))
 
     # ------------------------------------------------------------------ helpers
     def _brief(self, agents: list[str], text: str, extra: str = "") -> dict[str, object]:

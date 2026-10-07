@@ -6,14 +6,16 @@ from .models import RouteDecision
 
 
 _RULES: tuple[tuple[str, str, list[str], str], ...] = (
-    ("system_status", r"(kiểm tra|kiem tra|check|trạng thái|trang thai|status).*(hệ thống|he thong|connector|toàn bộ|toan bo)", [], "Yêu cầu trạng thái hệ thống."),
-    ("campaign", r"(chiến dịch|chien dich|campaign|quảng cáo|quang cao|facebook ads|google ads|ngân sách|ngan sach)", ["01_strategy", "07_campaign"], "Thiết kế chiến dịch cần chiến lược và điều phối kênh."),
+    ("system_status", r"(kiểm tra|kiem tra|check|trạng thái|trang thai|status).*(hệ thống|he thong|connector|toàn bộ|toan bo|tiktok)", [], "Yêu cầu trạng thái hệ thống."),
+    ("tiktok_social", r"(kênh tiktok|kenh tiktok|video tiktok|tiktok video|đăng tiktok|dang tiktok|kịch bản tiktok|kich ban tiktok|tiktok)", ["04_content", "07_campaign"], "Kế hoạch nội dung, video draft và chiến dịch TikTok."),
+    ("campaign", r"(chiến dịch|chien dich|campaign|quảng cáo|quang cao|facebook ads|google ads|tiktok ads|ngân sách|ngan sach)", ["01_strategy", "07_campaign"], "Thiết kế chiến dịch cần chiến lược và điều phối kênh."),
     ("sales_call", r"(chuẩn bị|chuan bi).*(cuộc gọi|cuoc goi|meeting)|account brief|proposal|deal support", ["03_account_intelligence", "06_sales_copilot"], "Cần thông tin account và hỗ trợ bán hàng."),
     ("lead_search", r"(tìm|tim|find|search).*(lead|khách hàng tiềm năng|khach hang tiem nang|prospect|account)|apollo|enrichment|lead scoring", ["03_account_intelligence"], "Nghiên cứu và chấm điểm lead/account."),
     ("market_intelligence", r"(đối thủ|doi thu|competitor|thị trường|thi truong|industry intelligence)", ["02_market_intelligence", "01_strategy"], "Nghiên cứu thị trường rồi chuyển thành hàm ý chiến lược."),
     ("seo_geo", r"\bseo\b|\bgeo\b|keyword|từ khóa|tu khoa|ai search|search visibility", ["05_seo_geo"], "Yêu cầu SEO/GEO chuyên biệt."),
+    ("publish_social", r"(đăng bài|dang bai|publish|đăng ngay|dang ngay|đăng lên|dang len)", ["04_content"], "Lệnh đăng bài trực tiếp từ người dùng."),
     ("content", r"(viết|viet|draft|content|bài linkedin|bai linkedin|landing page|video concept|email copy)", ["04_content"], "Tạo nội dung hoặc bản nháp theo kênh."),
-    ("kpi_report", r"(báo cáo|bao cao|kpi|hiệu quả|hieu qua|attribution|metrics|performance)", ["08_kpi_learning"], "Phân tích KPI và vòng học hỏi."),
+    ("kpi_report", r"(báo cáo|bao cao|kpi|hiệu quả|hieu qua|attribution|metrics|performance|thống kê|thong ke)", ["08_kpi_learning"], "Phân tích KPI và vòng học hỏi."),
     ("strategy", r"(icp|positioning|chiến lược|chien luoc|objective|mục tiêu|muc tieu)", ["01_strategy"], "Yêu cầu chiến lược marketing."),
 )
 

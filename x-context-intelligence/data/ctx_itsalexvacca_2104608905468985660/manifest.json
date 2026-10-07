@@ -1,0 +1,123 @@
+{
+  "job_id": "ctx_itsalexvacca_2104608905468985660",
+  "url": "https://x.com/itsalexvacca/status/2104608905468985660",
+  "canonical_url": "https://x.com/itsalexvacca/status/2104608905468985660",
+  "fetched_at": "2026-09-29T06:53:58.168312+00:00",
+  "root": {
+    "id": "2104608905468985660",
+    "url": "https://x.com/itsalexvacca/status/2104608905468985660",
+    "author": {
+      "id": null,
+      "name": "Alex Vacca",
+      "handle": "itsalexvacca",
+      "avatar_url": null,
+      "verified": false,
+      "description": null
+    },
+    "text": "https://x.com/i/article/2103485790227738624",
+    "created_at": "Mon Sep 28 16:27:19 +0000 2026",
+    "likes": 33,
+    "retweets": 1,
+    "replies_count": 1,
+    "quotes_count": 0,
+    "bookmarks_count": 0,
+    "views": 8072,
+    "media": [],
+    "links": [],
+    "is_thread": false,
+    "thread_posts": []
+  },
+  "author_followups": [],
+  "top_replies": [],
+  "quotes": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "author_itsalexvacca",
+        "label": "@itsalexvacca (Alex Vacca)",
+        "type": "AUTHOR",
+        "properties": {
+          "name": "Alex Vacca",
+          "handle": "itsalexvacca",
+          "verified": false
+        }
+      },
+      {
+        "id": "post_2104608905468985660",
+        "label": "Root Post 2104608905468985660",
+        "type": "ROOT_POST",
+        "properties": {
+          "url": "https://x.com/itsalexvacca/status/2104608905468985660",
+          "text": "https://x.com/i/article/2103485790227738624",
+          "likes": 33,
+          "retweets": 1,
+          "replies_count": 1
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "author_itsalexvacca",
+        "target": "post_2104608905468985660",
+        "relation": "AUTHORED",
+        "properties": {}
+      }
+    ]
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "replies_reported": 1,
+    "replies_retrieved": 0,
+    "author_replies_retrieved": 0,
+    "quotes_reported": 0,
+    "quotes_retrieved": 0,
+    "media_reported": 0,
+    "media_retrieved": 0,
+    "external_links_count": 0,
+    "external_links_resolved": 0,
+    "resolver_used": "FXTWITTER_API",
+    "truncation_reasons": [
+      "Conversation replies require browser authentication or extended scroll"
+    ],
+    "notes": "Retrieved 0/1 replies (0 author follow-ups). 0/0 media items processed. 0/0 external links resolved."
+  },
+  "summary": {
+    "title": "Post by @itsalexvacca",
+    "objective": "https://x.com/i/article/2103485790227738624",
+    "media_types": [],
+    "replies_analyzed": 0,
+    "author_followup_count": 0,
+    "external_links": 0,
+    "coverage_status": "PARTIAL"
+  },
+  "reproduction_plan": {
+    "job_id": "ctx_itsalexvacca_2104608905468985660",
+    "url": "https://x.com/itsalexvacca/status/2104608905468985660",
+    "demo_objective": "https://x.com/i/article/2103485790227738624",
+    "prerequisites": [
+      "Python",
+      "Chrome"
+    ],
+    "environment_variables": {},
+    "steps": [
+      {
+        "step_number": 1,
+        "name": "Verify Prerequisites & Local Runtime",
+        "objective": "Check if required runtime environments are available",
+        "source_classification": "INFERRED",
+        "original_command": null,
+        "windows_command": "Get-Command node, python, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' -ErrorAction SilentlyContinue",
+        "verification_command": "python --version",
+        "risk_level": "LOW",
+        "requires_approval": false,
+        "status": "PLANNED"
+      }
+    ],
+    "gap_analysis": {},
+    "validation_criteria": [
+      "Prerequisites verified",
+      "Safe execution only"
+    ],
+    "mode": "PLAN_ONLY"
+  }
+}

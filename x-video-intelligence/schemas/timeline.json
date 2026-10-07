@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "TruthClassification": {
+      "enum": [
+        "OBSERVED_IN_VIDEO",
+        "SPOKEN_IN_AUDIO",
+        "VISIBLE_TEXT",
+        "INFERRED",
+        "VERIFIED_CURRENT",
+        "OUTDATED",
+        "INCOMPATIBLE",
+        "BLOCKED",
+        "UNKNOWN"
+      ],
+      "title": "TruthClassification",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "step_id": {
+      "title": "Step Id",
+      "type": "integer"
+    },
+    "start": {
+      "default": 0.0,
+      "title": "Start",
+      "type": "number"
+    },
+    "end": {
+      "default": 0.0,
+      "title": "End",
+      "type": "number"
+    },
+    "observed_action": {
+      "title": "Observed Action",
+      "type": "string"
+    },
+    "spoken_content": {
+      "default": "",
+      "title": "Spoken Content",
+      "type": "string"
+    },
+    "command_candidate": {
+      "default": "",
+      "title": "Command Candidate",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/TruthClassification",
+      "default": "OBSERVED_IN_VIDEO"
+    },
+    "confidence": {
+      "default": 0.85,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "evidence_frames": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Frames",
+      "type": "array"
+    }
+  },
+  "required": [
+    "step_id",
+    "observed_action"
+  ],
+  "title": "ExtractedStep",
+  "type": "object"
+}

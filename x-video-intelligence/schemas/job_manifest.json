@@ -1,0 +1,295 @@
+{
+  "$defs": {
+    "ExtractedStep": {
+      "properties": {
+        "step_id": {
+          "title": "Step Id",
+          "type": "integer"
+        },
+        "start": {
+          "default": 0.0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "default": 0.0,
+          "title": "End",
+          "type": "number"
+        },
+        "observed_action": {
+          "title": "Observed Action",
+          "type": "string"
+        },
+        "spoken_content": {
+          "default": "",
+          "title": "Spoken Content",
+          "type": "string"
+        },
+        "command_candidate": {
+          "default": "",
+          "title": "Command Candidate",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TruthClassification",
+          "default": "OBSERVED_IN_VIDEO"
+        },
+        "confidence": {
+          "default": 0.85,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "evidence_frames": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Frames",
+          "type": "array"
+        }
+      },
+      "required": [
+        "step_id",
+        "observed_action"
+      ],
+      "title": "ExtractedStep",
+      "type": "object"
+    },
+    "FrameMetadata": {
+      "properties": {
+        "frame_index": {
+          "title": "Frame Index",
+          "type": "integer"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "number"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "kind": {
+          "default": "baseline",
+          "title": "Kind",
+          "type": "string"
+        },
+        "category": {
+          "default": "general",
+          "title": "Category",
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame_index",
+        "timestamp",
+        "path"
+      ],
+      "title": "FrameMetadata",
+      "type": "object"
+    },
+    "SceneInfo": {
+      "properties": {
+        "scene_id": {
+          "title": "Scene Id",
+          "type": "integer"
+        },
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "keyframe_path": {
+          "title": "Keyframe Path",
+          "type": "string"
+        },
+        "related_transcript": {
+          "default": "",
+          "title": "Related Transcript",
+          "type": "string"
+        },
+        "context_hint": {
+          "default": "",
+          "title": "Context Hint",
+          "type": "string"
+        },
+        "cropped_regions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cropped Regions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scene_id",
+        "start",
+        "end",
+        "keyframe_path"
+      ],
+      "title": "SceneInfo",
+      "type": "object"
+    },
+    "TranscriptSegment": {
+      "properties": {
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 0.9,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source": {
+          "default": "speech",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "TranscriptSegment",
+      "type": "object"
+    },
+    "TruthClassification": {
+      "enum": [
+        "OBSERVED_IN_VIDEO",
+        "SPOKEN_IN_AUDIO",
+        "VISIBLE_TEXT",
+        "INFERRED",
+        "VERIFIED_CURRENT",
+        "OUTDATED",
+        "INCOMPATIBLE",
+        "BLOCKED",
+        "UNKNOWN"
+      ],
+      "title": "TruthClassification",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "source_url": {
+      "title": "Source Url",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "resolver_used": {
+      "title": "Resolver Used",
+      "type": "string"
+    },
+    "post_text": {
+      "default": "",
+      "title": "Post Text",
+      "type": "string"
+    },
+    "author": {
+      "default": "",
+      "title": "Author",
+      "type": "string"
+    },
+    "published_at": {
+      "default": "",
+      "title": "Published At",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "default": 0.0,
+      "title": "Duration Seconds",
+      "type": "number"
+    },
+    "resolution": {
+      "default": "",
+      "title": "Resolution",
+      "type": "string"
+    },
+    "fps": {
+      "default": 0.0,
+      "title": "Fps",
+      "type": "number"
+    },
+    "audio_codec": {
+      "default": "",
+      "title": "Audio Codec",
+      "type": "string"
+    },
+    "video_codec": {
+      "default": "",
+      "title": "Video Codec",
+      "type": "string"
+    },
+    "video_checksum": {
+      "default": "",
+      "title": "Video Checksum",
+      "type": "string"
+    },
+    "transcript": {
+      "items": {
+        "$ref": "#/$defs/TranscriptSegment"
+      },
+      "title": "Transcript",
+      "type": "array"
+    },
+    "scenes": {
+      "items": {
+        "$ref": "#/$defs/SceneInfo"
+      },
+      "title": "Scenes",
+      "type": "array"
+    },
+    "frames": {
+      "items": {
+        "$ref": "#/$defs/FrameMetadata"
+      },
+      "title": "Frames",
+      "type": "array"
+    },
+    "extracted_steps": {
+      "items": {
+        "$ref": "#/$defs/ExtractedStep"
+      },
+      "title": "Extracted Steps",
+      "type": "array"
+    },
+    "extraction_warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Extraction Warnings",
+      "type": "array"
+    },
+    "status": {
+      "default": "COMPLETED",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "source_url",
+    "created_at",
+    "resolver_used"
+  ],
+  "title": "JobManifest",
+  "type": "object"
+}

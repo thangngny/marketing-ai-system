@@ -1,0 +1,28 @@
+{
+  "service_name": "x-video-intelligence",
+  "version": "1.0.0",
+  "data_dir": "C:\\Users\\Admin\\marketing-ai-system\\x-video-intelligence\\data\\jobs",
+  "reports_dir": "C:\\Users\\Admin\\marketing-ai-system\\x-video-intelligence\\reports",
+  "ffmpeg_path": "ffmpeg",
+  "ffprobe_path": "ffprobe",
+  "sampling": {
+    "baseline_fps": 1.0,
+    "high_density_fps": 4.0,
+    "scene_threshold": 0.3,
+    "max_frames_per_job": 300
+  },
+  "confidence_thresholds": {
+    "critical_command_min_confidence": 0.90,
+    "noncritical_min_confidence": 0.75
+  },
+  "execution": {
+    "default_mode": "PLAN_ONLY",
+    "allowed_modes": ["ANALYZE_ONLY", "PLAN_ONLY", "REPRODUCE_SAFE", "REPRODUCE_FULL"]
+  },
+  "retention": {
+    "keep_manifest_days": 30,
+    "keep_raw_media_days": 7,
+    "max_job_size_mb": 1024
+  },
+  "resolvers_priority": ["X_API", "YTDLP", "BROWSER", "MANUAL_FILE_REQUIRED"]
+}

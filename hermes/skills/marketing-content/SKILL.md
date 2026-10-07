@@ -18,7 +18,7 @@ Create concrete copy and briefs that fit the audience, funnel stage, and channel
 
 ## When to Use
 
-Use for LinkedIn, website, email, YouTube, Facebook, landing pages, and sales assets.
+Use for LinkedIn, website, email, YouTube, Facebook, TikTok, landing pages, and sales assets.
 
 ## Prerequisites
 

@@ -26,6 +26,8 @@ CODE_SUPPORT: dict[str, set[str]] = {
     "youtube": {"READ", "ANALYTICS"},
     "meta_ads": set(),
     "google_ads": set(),
+    "tiktok": {"READ", "ANALYTICS", "DRAFT", "PUBLISH"},
+    "meta_ai": {"READ", "DRAFT"},
 }
 
 # Verified human-only blockers (INTEGRATION_MATRIX.md, 2026-09-22/24). Applied when credentials are absent.
@@ -38,12 +40,13 @@ KNOWN_BLOCKERS: dict[str, tuple[S, str]] = {
     "meta_ads": (S.NOT_CONFIGURED, "Meta Business login, app, ads_read token and ad account access missing."),
     "google_ads": (S.NEEDS_ADMIN_APPROVAL, "Account 150-914-5225 is a standard Ads account, not a Manager (MCC); "
                   "API Center refuses developer-token applications from it. Needs a new Manager account linked to it."),
+    "tiktok": (S.AUTHENTICATING, "TikTok Sandbox app configured. Run 'python -m marketing_system.cli auth tiktok' to authorize account."),
 }
 
 PUBLISH_BLOCKERS: dict[str, S] = {
     "linkedin": S.NEEDS_API_ACCESS, "youtube": S.NEEDS_API_ACCESS, "meta_ads": S.NEEDS_API_ACCESS,
     "google_ads": S.NEEDS_API_ACCESS, "website": S.NOT_CONFIGURED, "m365": S.NOT_CONFIGURED,
-    "zoho": S.NOT_CONFIGURED, "apollo": S.NOT_CONFIGURED,
+    "zoho": S.NOT_CONFIGURED, "apollo": S.NOT_CONFIGURED, "tiktok": S.NEEDS_API_ACCESS,
 }
 
 

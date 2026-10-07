@@ -42,6 +42,7 @@ class ToolContext(BaseModel):
     user_id: str | None = None
     channel_id: str | None = None
     runtime: str | None = None
+    direct_user_publish: bool = False
 
 
 class ToolSpec(BaseModel):
@@ -166,6 +167,7 @@ class ToolHub:
             tool=spec.name, namespace=spec.namespace, impact=spec.impact, specialist=specialist,
             environment=self.settings.environment, safe_dry_run=self.settings.safe_dry_run,
             payload_digest=digest, approval=approval,
+            direct_user_publish=ctx.direct_user_publish,
         )
         common["decision"] = str(verdict.decision)
         if verdict.decision is Decision.DENY:

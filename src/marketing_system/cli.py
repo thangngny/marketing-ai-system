@@ -13,7 +13,7 @@ from .config import PROJECT_ROOT, Settings
 from .constants import TestState
 from .credentials import available as credential_store_available
 from .credentials import credential_present, write_credential
-from .oauth import authorize_m365, authorize_zoho
+from .oauth import authorize_m365, authorize_tiktok, authorize_zoho
 from .orchestrator import MarketingOrchestrator
 from .routing import route_intent
 
@@ -155,7 +155,11 @@ def command_oauth(args: argparse.Namespace) -> int:
 
         result = authorize_zoho_mcp()
     else:
-        result = authorize_m365() if args.provider == "m365" else authorize_zoho()
+        result = (
+            authorize_tiktok()
+            if args.provider == "tiktok"
+            else authorize_m365() if args.provider == "m365" else authorize_zoho()
+        )
     print(f"{result['provider']}: {result['state']} (token value not displayed)")
     return 0
 
@@ -173,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument("text")
     route.set_defaults(func=command_route)
     connector = sub.add_parser("connector")
-    connector.add_argument("name", choices=["zoho", "m365", "apollo", "linkedin", "youtube", "meta_ads", "google_ads", "website"])
+    connector.add_argument("name", choices=["zoho", "m365", "apollo", "linkedin", "youtube", "meta_ads", "google_ads", "website", "tiktok"])
     connector.add_argument("--live", action="store_true", help="Run a non-destructive live probe; provider quota may apply.")
     connector.set_defaults(func=command_connector)
     handle = sub.add_parser("handle")
@@ -198,8 +202,11 @@ def build_parser() -> argparse.ArgumentParser:
     approvals.add_argument("code", nargs="?")
     approvals.set_defaults(func=command_approvals)
     oauth = sub.add_parser("oauth")
-    oauth.add_argument("provider", choices=["m365", "zoho", "zoho-mcp"])
+    oauth.add_argument("provider", choices=["m365", "zoho", "zoho-mcp", "tiktok"])
     oauth.set_defaults(func=command_oauth)
+    auth = sub.add_parser("auth")
+    auth.add_argument("provider", choices=["m365", "zoho", "zoho-mcp", "tiktok"])
+    auth.set_defaults(func=command_oauth)
     return parser
 
 

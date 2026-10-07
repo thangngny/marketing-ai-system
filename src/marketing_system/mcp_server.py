@@ -72,7 +72,7 @@ def marketing_request_execution(action: str) -> SafetyDecision:
 @server.tool()
 def marketing_sync_readonly(connector: str, resource: str, limit: int = 25) -> ReadonlySyncResult:
     """Live-verify a connector, read bounded provider data, normalize it, and stage it locally."""
-    if connector not in {"zoho", "m365", "website", "youtube"}:
+    if connector not in {"zoho", "m365", "website", "youtube", "tiktok"}:
         return ReadonlySyncResult(state="UNSUPPORTED_CONNECTOR", connector=connector, resource=resource)
     return orchestrator.sync_readonly(connector, resource, limit=min(max(limit, 1), 100))
 
