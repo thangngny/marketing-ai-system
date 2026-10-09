@@ -326,8 +326,13 @@ class VideoComposer:
         for ch in config.auto_publish_channels:
             if ch.lower() == "tiktok":
                 try:
-                    res = self.tiktok.upload_video_file(file_path=str(file_path), title=config.title)
-                    status["tiktok"] = f"Draft/Video staged successfully: {res.get('publish_id') or 'READY'}"
+                    res = self.tiktok.upload_video_file(
+                        file_path=str(file_path),
+                        title=config.title,
+                        privacy_level="PUBLIC_TO_EVERYONE",
+                        publish_mode="auto",
+                    )
+                    status["tiktok"] = f"Video staged/published ({res.get('mode')}): {res.get('publish_id') or 'READY'}"
                 except Exception as exc:
                     status["tiktok"] = f"Upload error: {exc}"
         return status

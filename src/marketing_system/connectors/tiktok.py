@@ -164,7 +164,7 @@ class TikTokConnector(BaseConnector):
         self,
         file_path: str,
         title: str = "",
-        privacy_level: str = "SELF_ONLY",
+        privacy_level: str = "PUBLIC_TO_EVERYONE",
         publish_mode: str = "auto",
     ) -> dict[str, Any]:
         """Upload a video file to TikTok.
@@ -271,9 +271,11 @@ class TikTokConnector(BaseConnector):
             "connector": self.name,
             "status": "success",
             "mode": mode_used,
+            "privacy_level": privacy_level,
             "publish_id": publish_id,
             "tiktok_status": status_info,
             "file": str(p),
             "size_bytes": size,
             "title": title or p.stem,
+            "note": "Video đã được gửi vào Hộp thư TikTok (Inbox). Mở app TikTok bấm thông báo để Đăng công khai." if mode_used == "inbox_draft" else f"Video đã xuất bản thành công ở chế độ {privacy_level}."
         }

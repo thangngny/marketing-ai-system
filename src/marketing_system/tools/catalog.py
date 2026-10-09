@@ -102,12 +102,14 @@ class PublishPostIn(BaseModel):
 
 class PagePostDraftIn(BaseModel):
     message: str = Field(min_length=10, max_length=3000)
+    published: bool = Field(True, description="Đặt True để đăng bài công khai trực tiếp lên Fanpage Facebook (mặc định công khai); False để lưu bản nháp riêng tư.")
 
 
 class TikTokDraftIn(BaseModel):
     title: str = Field(min_length=3, max_length=200, description="Tiêu đề hoặc caption video TikTok.")
-    video_source: str = Field(description="URL hoặc đường dẫn file video để tải nháp.")
-    privacy_level: str = Field("SELF_ONLY", description="Mức độ riêng tư: SELF_ONLY (chỉ mình tôi - Sandbox).")
+    video_source: str = Field(description="URL hoặc đường dẫn file video để tải lên.")
+    privacy_level: str = Field("PUBLIC_TO_EVERYONE", description="Mức độ riêng tư: PUBLIC_TO_EVERYONE (công khai cho mọi người), MUTUAL_FOLLOW_FRIENDS, hoặc SELF_ONLY (chỉ mình tôi).")
+    publish_mode: Literal["auto", "direct", "inbox"] = Field("auto", description="Chế độ tải lên: auto (đăng công khai trực tiếp, tự fallback inbox nếu cần), direct, hoặc inbox.")
 
 
 class VideoProduceIn(BaseModel):
@@ -442,21 +444,23 @@ def social_publish_post(args: PublishPostIn, rt: HubRuntime) -> dict[str, Any]:
                 file_path = str(default_vid)
             else:
                 raise FileNotFoundError(f"Video file not found for TikTok publish: {args.text}")
-        return connector.upload_video_file(file_path=file_path, title=title, publish_mode="auto")
+        return connector.upload_video_file(file_path=file_path, title=title, privacy_level="PUBLIC_TO_EVERYONE", publish_mode="auto")
     else:
         raise NotImplementedError(f"Publishing to channel '{args.channel}' is not enabled or requires product approval.")
 
 
 def social_create_page_post_draft(args: PagePostDraftIn, rt: HubRuntime) -> dict[str, Any]:
     if rt.mock:
-        return _artifact(rt, "facebook-page-post-draft", "draft",
-                         {"message": args.message, "status": "draft", "published": False, "label": "SYNTHETIC_MOCK_DATA"})
+        return _artifact(rt, "facebook-page-post", "post",
+                         {"message": args.message, "status": "published" if args.published else "draft", "published": args.published, "label": "SYNTHETIC_MOCK_DATA"})
     # Page posting only needs META_PAGE_ACCESS_TOKEN/META_PAGE_ID, not the ad-account
     # credentials that _live_connector's report()-based gate requires, so check that
     # directly instead of routing through the ads-account readiness check.
     connector = rt.registry.get("meta_ads")
     if not connector.page_configured():
         raise ToolUnavailable("NOT_CONFIGURED", "META_PAGE_ACCESS_TOKEN / META_PAGE_ID missing.")
+    if args.published:
+        return connector.publish_page_post(args.message)
     return connector.create_page_post_draft(args.message)
 
 
@@ -477,9 +481,10 @@ def tiktok_get_recent_videos(args: LimitIn, rt: HubRuntime) -> list[dict[str, An
 def tiktok_upload_video_draft(args: TikTokDraftIn, rt: HubRuntime) -> dict[str, Any]:
     connector = _live_connector(rt, "tiktok")
     if rt.mock:
-        return _artifact(rt, "tiktok-video-draft", args.title,
+        return _artifact(rt, "tiktok-video", args.title,
                          {"title": args.title, "video_source": args.video_source, "privacy_level": args.privacy_level,
-                          "status": "draft_inbox", "published": False, "label": "SYNTHETIC_MOCK_DATA"})
+                          "status": "published" if args.privacy_level == "PUBLIC_TO_EVERYONE" else "draft_inbox",
+                          "published": args.privacy_level == "PUBLIC_TO_EVERYONE", "label": "SYNTHETIC_MOCK_DATA"})
     from pathlib import Path
     source_path = Path(args.video_source.strip())
     if not source_path.is_file():
@@ -491,7 +496,7 @@ def tiktok_upload_video_draft(args: TikTokDraftIn, rt: HubRuntime) -> dict[str, 
             file_path=str(source_path),
             title=args.title,
             privacy_level=args.privacy_level,
-            publish_mode="inbox",
+            publish_mode=args.publish_mode,
         )
     return {"status": "staged_draft", "title": args.title, "privacy_level": args.privacy_level, "video_source": args.video_source}
 
@@ -727,13 +732,13 @@ CATALOG: list[tuple[ToolSpec, Any]] = [
     (_spec("social.publish_post", Impact.HIGH_IMPACT, "linkedin", "publish_post", PublishPostIn,
            "Publish a social post (approval + phase gate).", lambda p: f"ĐĂNG bài lên {p['channel']}: {p['text'][:120]}"), social_publish_post),
     (_spec("social.create_facebook_page_post_draft", Impact.DRAFT, "meta_ads", "create_page_post_draft", PagePostDraftIn,
-           "Create an unpublished Facebook Page post draft (published=false; never public)."), social_create_page_post_draft),
+           "Đăng bài lên Fanpage Facebook (mặc định published=true công khai; có thể đặt published=false để lưu nháp)."), social_create_page_post_draft),
     (_spec("tiktok.get_channel_metrics", Impact.READ, "tiktok", "read_channel_metrics", NoInput,
            "TikTok account followers, following, likes, and video count."), tiktok_get_channel_metrics),
     (_spec("tiktok.get_recent_videos", Impact.READ, "tiktok", "read_recent_videos", LimitIn,
            "Latest published TikTok videos with views, likes, comments, and shares."), tiktok_get_recent_videos),
     (_spec("tiktok.upload_video_draft", Impact.DRAFT, "tiktok", "upload_video_draft", TikTokDraftIn,
-           "Stage or upload a video draft to TikTok inbox (never public)."), tiktok_upload_video_draft),
+           "Tải lên video TikTok ở chế độ công khai PUBLIC_TO_EVERYONE (tự fallback inbox nếu cần)."), tiktok_upload_video_draft),
     (_spec("video.produce_full_video", Impact.DRAFT, "multi", "produce_full_video", VideoProduceIn,
            "Dây chuyền sản xuất video tự động đa phương thức: ElevenLabs voice, HeyGen/Higgsfield visual, Whisper kinetic subtitles, FFmpeg ducking & Blossom export kèm báo cáo công nghệ tích hợp."), video_produce_full_video),
     (_spec("ads.get_campaign_performance", Impact.READ, "meta_ads", "read_ad_metrics", AdsPerfIn,
