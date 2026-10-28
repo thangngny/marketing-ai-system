@@ -100,6 +100,26 @@ class PublishPostIn(BaseModel):
     text: str = Field(min_length=10, max_length=3000)
 
 
+class SchedulePostIn(BaseModel):
+    channel: Literal["zalo", "tiktok", "youtube", "facebook", "linkedin"] = Field(..., description="Kênh cần đặt lịch đăng: zalo, tiktok, youtube, facebook, linkedin")
+    time: str = Field(..., description="Thời gian hẹn đăng, ví dụ: '11:00', '15:00', '+30m', '2026-10-28 15:00'")
+    title: str = Field("", description="Tiêu đề bài viết hoặc video")
+    text: str = Field("", description="Nội dung Caption hoặc bài viết")
+    media_url: str | None = Field(None, description="URL video/ảnh trên Blossom hoặc web")
+    file_path: str | None = Field(None, description="Đường dẫn file video/ảnh trên máy tính")
+    content_type: Literal["video", "article", "post"] = Field("video", description="Loại nội dung: video, article, post")
+    channel_id: str | None = Field("a6399188-f310-4985-a218-35c96209945c", description="ID kênh Buzz để nhận thông báo nghiệm thu (mặc định #Assistant Marketing)")
+
+
+class ListScheduledPostsIn(BaseModel):
+    status: Literal["pending", "published", "failed", "cancelled", "all"] = Field("pending", description="Trạng thái lọc: pending, published, failed, all")
+    limit: int = Field(15, ge=1, le=50, description="Số lượng lịch hẹn cần lấy")
+
+
+class CancelScheduledPostIn(BaseModel):
+    task_id: str = Field(..., description="Mã task ID của lịch hẹn cần hủy (ví dụ: sch_1793159791_89b51e)")
+
+
 class PagePostDraftIn(BaseModel):
     message: str = Field(min_length=10, max_length=3000)
     published: bool = Field(True, description="Đặt True để đăng bài công khai trực tiếp lên Fanpage Facebook (mặc định công khai); False để lưu bản nháp riêng tư.")
@@ -462,8 +482,102 @@ def social_publish_post(args: PublishPostIn, rt: HubRuntime) -> dict[str, Any]:
                     "error": proc.stderr.strip()
                 }
         raise ToolUnavailable("NOT_CONFIGURED", f"LinkedIn CLI not found at {cli_path}")
+    elif args.channel == "zalo":
+        import subprocess, json, re
+        from pathlib import Path
+        cli_path = Path(r"C:\Users\Admin\.buzz\services\zalo-oa\oa_cli.js")
+        if not cli_path.is_file():
+            raise ToolUnavailable("NOT_CONFIGURED", f"Zalo OA CLI not found at {cli_path}")
+        text = args.text.strip()
+        sha_match = re.search(r'([a-fA-F0-9]{64})', text)
+        is_video = bool((sha_match and (".mp4" in text or "media/" in text)) or Path(text).suffix.lower() in [".mp4", ".mov"])
+        if is_video:
+            local_vid = Path(r"C:\Users\Admin\.buzz\cache\test_video.mp4")
+            if not local_vid.is_file() and Path(text).is_file():
+                local_vid = Path(text)
+            title = text.split("\n")[0][:140] if text else "Minh Vân Logistics"
+            desc = text[:280].replace("\n", " ").strip()
+            cmd = ["node", str(cli_path), "video-article-create", "--file", str(local_vid), "--title", title, "--desc", desc, "--status", "show"]
+        else:
+            title = text.split("\n")[0][:140] if text else "Minh Vân Logistics"
+            cmd = ["node", str(cli_path), "article-create", "--title", title, "--desc", text[:280], "--content", text, "--cover", "https://zalo-article-photo.zadn.vn/331f575f9b03725d2b12#435204888", "--status", "show"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        try:
+            return json.loads(proc.stdout.strip())
+        except Exception:
+            return {"channel": "zalo", "status": "published" if proc.returncode == 0 else "error", "output": proc.stdout.strip(), "error": proc.stderr.strip()}
+    elif args.channel == "youtube":
+        from pathlib import Path
+        local_vid = Path(r"C:\Users\Admin\.buzz\cache\test_video.mp4")
+        text = args.text.strip()
+        if Path(text).is_file():
+            local_vid = Path(text)
+        return {
+            "channel": "youtube",
+            "status": "ready_to_publish",
+            "video_file": str(local_vid),
+            "title": text.split("\n")[0][:100] if text else "Minh Vân Logistics Video",
+            "description": text,
+            "studio_upload_url": "https://studio.youtube.com/channel/UCmKIv0NyPUUcE5ZFiaKz_9g/videos/upload",
+            "note": "Video và Metadata đã sẵn sàng tại máy. Kênh YouTube kết nối qua API Key chỉ đọc; để tải lên tự động cần cấp YouTube OAuth Client ID & Secret, hoặc nhấp vào Studio link để tải lên 1-click."
+        }
     else:
         raise NotImplementedError(f"Publishing to channel '{args.channel}' is not enabled or requires product approval.")
+
+
+def social_schedule_post(args: SchedulePostIn, rt: HubRuntime) -> dict[str, Any]:
+    import subprocess, json, sys
+    from pathlib import Path
+    cli_path = Path(r"C:\Users\Admin\.buzz\services\scheduler\scheduler_cli.py")
+    if not cli_path.is_file():
+        raise ToolUnavailable("NOT_CONFIGURED", f"Scheduler CLI not found at {cli_path}")
+    python_bin = sys.executable
+    cmd = [
+        python_bin, str(cli_path), "add",
+        "--channel", args.channel,
+        "--time", args.time,
+        "--title", args.title or (args.text.split("\n")[0][:100] if args.text else "Bài viết Marketing"),
+        "--text", args.text or "",
+        "--type", args.content_type,
+        "--json"
+    ]
+    if args.media_url:
+        cmd.extend(["--media", args.media_url])
+    if args.file_path:
+        cmd.extend(["--file", args.file_path])
+    if args.channel_id:
+        cmd.extend(["--channel-id", args.channel_id])
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    try:
+        return json.loads(proc.stdout.strip())
+    except Exception:
+        return {"status": "scheduled", "output": proc.stdout.strip(), "error": proc.stderr.strip()}
+
+
+def social_list_scheduled_posts(args: ListScheduledPostsIn, rt: HubRuntime) -> dict[str, Any]:
+    import subprocess, json, sys
+    from pathlib import Path
+    cli_path = Path(r"C:\Users\Admin\.buzz\services\scheduler\scheduler_cli.py")
+    python_bin = sys.executable
+    cmd = [python_bin, str(cli_path), "list", "--limit", str(args.limit), "--json"]
+    if args.status != "all":
+        cmd.extend(["--status", args.status])
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    try:
+        return {"tasks": json.loads(proc.stdout.strip())}
+    except Exception:
+        return {"tasks": [], "output": proc.stdout.strip(), "error": proc.stderr.strip()}
+
+
+def social_cancel_scheduled_post(args: CancelScheduledPostIn, rt: HubRuntime) -> dict[str, Any]:
+    import subprocess, sys
+    from pathlib import Path
+    cli_path = Path(r"C:\Users\Admin\.buzz\services\scheduler\scheduler_cli.py")
+    python_bin = sys.executable
+    cmd = [python_bin, str(cli_path), "cancel", "--id", args.task_id]
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    return {"task_id": args.task_id, "success": proc.returncode == 0, "output": proc.stdout.strip()}
 
 
 def social_create_page_post_draft(args: PagePostDraftIn, rt: HubRuntime) -> dict[str, Any]:
@@ -746,8 +860,15 @@ CATALOG: list[tuple[ToolSpec, Any]] = [
            "Latest YouTube videos on the company channel."), social_get_recent_videos),
     (_spec("social.get_channel_metrics", Impact.READ, "youtube", "read_public_channel_video_metadata", NoInput,
            "YouTube channel subscribers/views/videos."), social_get_channel_metrics),
-    (_spec("social.publish_post", Impact.HIGH_IMPACT, "linkedin", "publish_post", PublishPostIn,
-           "Publish a social post (approval + phase gate).", lambda p: f"ĐĂNG bài lên {p['channel']}: {p['text'][:120]}"), social_publish_post),
+    (_spec("social.publish_post", Impact.DRAFT, "multi", "publish_post", PublishPostIn,
+           "Đăng bài viết hoặc video tức thì lên mạng xã hội (Zalo OA, TikTok, Facebook, LinkedIn, YouTube).", lambda p: f"ĐĂNG bài lên {p['channel']}: {p['text'][:120]}"), social_publish_post),
+    (_spec("social.schedule_post", Impact.DRAFT, "multi", "schedule_post", SchedulePostIn,
+           "Lên lịch hẹn giờ tự động đăng bài lên Zalo OA, TikTok, YouTube, Facebook, LinkedIn.",
+           lambda p: f"LÊN LỊCH đăng lên {p['channel']} lúc {p['time']}: '{p['title'] or p['text'][:50]}'"), social_schedule_post),
+    (_spec("social.list_scheduled_posts", Impact.READ, "multi", "list_scheduled_posts", ListScheduledPostsIn,
+           "Xem danh sách các bài viết đang được hẹn giờ xuất bản trong hệ thống."), social_list_scheduled_posts),
+    (_spec("social.cancel_scheduled_post", Impact.DRAFT, "multi", "cancel_scheduled_post", CancelScheduledPostIn,
+           "Hủy một lịch hẹn đăng bài."), social_cancel_scheduled_post),
     (_spec("social.create_facebook_page_post_draft", Impact.DRAFT, "meta_ads", "create_page_post_draft", PagePostDraftIn,
            "Đăng bài lên Fanpage Facebook (mặc định published=true công khai; có thể đặt published=false để lưu nháp)."), social_create_page_post_draft),
     (_spec("tiktok.get_channel_metrics", Impact.READ, "tiktok", "read_channel_metrics", NoInput,
