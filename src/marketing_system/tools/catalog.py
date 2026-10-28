@@ -507,20 +507,20 @@ def social_publish_post(args: PublishPostIn, rt: HubRuntime) -> dict[str, Any]:
         except Exception:
             return {"channel": "zalo", "status": "published" if proc.returncode == 0 else "error", "output": proc.stdout.strip(), "error": proc.stderr.strip()}
     elif args.channel == "youtube":
+        connector = _live_connector(rt, "youtube")
         from pathlib import Path
         local_vid = Path(r"C:\Users\Admin\.buzz\cache\test_video.mp4")
         text = args.text.strip()
+        title = "Minh Van Logistics Video"
+        description = text
         if Path(text).is_file():
             local_vid = Path(text)
-        return {
-            "channel": "youtube",
-            "status": "ready_to_publish",
-            "video_file": str(local_vid),
-            "title": text.split("\n")[0][:100] if text else "Minh Vân Logistics Video",
-            "description": text,
-            "studio_upload_url": "https://studio.youtube.com/channel/UCmKIv0NyPUUcE5ZFiaKz_9g/videos/upload",
-            "note": "Video và Metadata đã sẵn sàng tại máy. Kênh YouTube kết nối qua API Key chỉ đọc; để tải lên tự động cần cấp YouTube OAuth Client ID & Secret, hoặc nhấp vào Studio link để tải lên 1-click."
-        }
+            title = local_vid.stem
+        elif local_vid.is_file():
+            title = text.split("\n")[0][:100] if text else "Minh Van Logistics Video"
+        else:
+            raise FileNotFoundError(f"Video file not found for YouTube publish: {args.text}")
+        return connector.upload_video(file_path=str(local_vid), title=title[:100], description=description, privacy="public")
     else:
         raise NotImplementedError(f"Publishing to channel '{args.channel}' is not enabled or requires product approval.")
 
