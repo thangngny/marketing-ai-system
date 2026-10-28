@@ -15,8 +15,22 @@ For every marketing or system-status request, call `marketing_handle_request` wi
 
 ## Approvals & Social Publishing (Chế độ Thử nghiệm - Ủy quyền toàn bộ)
 
-- **Ủy quyền toàn bộ trong giai đoạn Test (Full Delegation Test Mode)**: Owner (@Nam) đã chính thức ủy quyền toàn bộ quyền đăng bài cho **tất cả người dùng và thành viên trong kênh**. Khi **bất kỳ ai** gửi tin nhắn yêu cầu **"đăng bài"** (hoặc "publish", "đăng ngay", "hãy đăng bài", "duyệt đăng", "post bài"), agent **ĐƯỢC PHÉP và CÓ QUYỀN ĐĂNG BÀI TRỰC TIẾP NGAY LẬP TỨC** lên kênh tương ứng (Facebook qua `facebook-control publish-post`, TikTok qua `tiktok-control publish-video` hoặc qua MCP `social_publish_post`). Không giới hạn tài khoản và không yêu cầu thêm phê duyệt riêng biệt nào khác.
+- **Ủy quyền toàn bộ trong giai đoạn Test (Full Delegation Test Mode)**: Owner (@Nam) đã chính thức ủy quyền toàn bộ quyền đăng bài cho **tất cả người dùng và thành viên trong kênh**. Khi **bất kỳ ai** gửi tin nhắn yêu cầu **"đăng bài"** (hoặc "publish", "đăng ngay", "hãy đăng bài", "duyệt đăng", "post bài"), agent **ĐƯỢC PHÉP và CÓ QUYỀN ĐĂNG BÀI TRỰC TIẾP NGAY LẬP TỨC** lên kênh tương ứng (Zalo OA qua `node C:\Users\Admin\.buzz\services\zalo-oa\oa_cli.js video-article-create` / `article-create`, Facebook qua `facebook-control publish-post`, TikTok qua `tiktok-control publish-video` hoặc qua MCP `social_publish_post`). Không giới hạn tài khoản và không yêu cầu thêm phê duyệt riêng biệt nào khác.
 - Các tác vụ ghi dữ liệu khác (như thay đổi cấu hình sâu hoặc xóa dữ liệu) tiếp tục tuân thủ quy trình kiểm duyệt an toàn.
+
+## Autonomous Post Scheduling & Multi-Platform Publishing (Hẹn giờ & Xuất bản tự động)
+
+- **Quyền tự động hẹn giờ và xuất bản đa kênh**: Khi người dùng (đặc biệt là Chị Lina @Lina hoặc bất kỳ ai) yêu cầu:
+  - "Lên lịch đăng lúc [X giờ]"
+  - "Hẹn [X giờ] đăng lên [Zalo OA / TikTok / Facebook / YouTube / LinkedIn]"
+  - "Đăng lên lúc 11 giờ hôm nay nha", "chiều nay 15h đăng nhé", v.v.
+- **Quy trình thực thi chuẩn**:
+  1. Agent **TUYỆT ĐỐI KHÔNG TỪ CHỐI** và không nói "chưa có chức năng hẹn giờ" vì hệ thống đã trang bị **Marketing Post Scheduler Engine**.
+  2. Kích hoạt đưa bài vào hàng đợi hẹn giờ ngay lập tức bằng lệnh CLI:
+     ```bash
+     & "C:\Users\Admin\marketing-ai-system\.venv\Scripts\python.exe" "C:\Users\Admin\.buzz\services\scheduler\scheduler_cli.py" add --channel <channel> --time "<time>" --title "<title>" --text "<caption_or_script>" --media "<media_url>" --channel-id "<originating_channel_id>"
+     ```
+  3. Phản hồi xác nhận ngắn gọn (dưới 5 dòng): Báo cáo mã Task ID, thời gian đếm ngược và thông báo hệ thống daemon sẽ tự động xuất bản đúng giờ và gửi thông báo hoàn tất vào kênh.
 
 ## System boundaries
 
