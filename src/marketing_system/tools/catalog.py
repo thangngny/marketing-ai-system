@@ -445,6 +445,23 @@ def social_publish_post(args: PublishPostIn, rt: HubRuntime) -> dict[str, Any]:
             else:
                 raise FileNotFoundError(f"Video file not found for TikTok publish: {args.text}")
         return connector.upload_video_file(file_path=file_path, title=title, privacy_level="PUBLIC_TO_EVERYONE", publish_mode="auto")
+    elif args.channel == "linkedin":
+        import subprocess, json
+        from pathlib import Path
+        cli_path = Path(r"C:\Users\Admin\.buzz\services\linkedin\linkedin_cli.js")
+        if cli_path.is_file():
+            cmd = ["node", str(cli_path), "post", "--text", args.text]
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+            try:
+                return json.loads(proc.stdout.strip())
+            except Exception:
+                return {
+                    "channel": "linkedin",
+                    "status": "published" if proc.returncode == 0 else "fallback_triggered",
+                    "output": proc.stdout.strip(),
+                    "error": proc.stderr.strip()
+                }
+        raise ToolUnavailable("NOT_CONFIGURED", f"LinkedIn CLI not found at {cli_path}")
     else:
         raise NotImplementedError(f"Publishing to channel '{args.channel}' is not enabled or requires product approval.")
 

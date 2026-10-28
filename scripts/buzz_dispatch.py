@@ -20,9 +20,13 @@ DEFAULT_RELAY = "wss://phamgianam.communities.buzz.xyz"
 
 # Agent Registry: canonical name, pubkey, and common aliases
 AGENT_REGISTRY = {
+    "troly": {
+        "pubkey": "fbc48fb951751d9c2e93b741d3348e750ae7038e6b1e6d45f06e50af67dfd868",
+        "aliases": ["troly", "tro ly", "tro ly tong hop", "assistant"]
+    },
     "Marketing Orchestrator": {
         "pubkey": "9612286f19ecd7692958e7eda8fc449535b3a7076ef45ca17a8bd40ed9ce8e87",
-        "aliases": ["orchestrator", "marketing_orchestrator", "marketing orchestrator", "dieu phoi", "assistant", "assistant marketing", "assistant_marketing", "tro ly", "tro ly marketing"]
+        "aliases": ["orchestrator", "marketing_orchestrator", "marketing orchestrator", "dieu phoi", "assistant marketing", "assistant_marketing"]
     },
     "Content Planner": {
         "pubkey": "8f417c9a9e5976b031872b598729051349f49e4f8b34487c81c0415328e0bbdc",
