@@ -268,6 +268,9 @@ VIDEO_PRODUCTION = WorkflowDefinition(
 # ---------------------------------------------------------------- GTM Enterprise Lead Pipeline
 def step_gtm_discover(ctx: StepContext) -> StepOutcome:
     p = ctx.params
+    if p.get("candidates"):
+        candidates = p["candidates"]
+        return StepOutcome(status="done", output={"discovered": candidates, "total": len(candidates)})
     limit = int(p.get("limit", 10))
     keywords = p.get("keywords") or ["medical", "thiết bị y tế", "dược phẩm", "linh kiện điện tử"]
     result = ctx.tool("prospecting.pipeline_run", {
@@ -292,21 +295,43 @@ def step_gtm_crm_preview(ctx: StepContext) -> StepOutcome:
 
 def step_gtm_gate(ctx: StepContext) -> StepOutcome:
     preview = ctx.outputs["crm_preview"]
-    staged = preview.get("staged_records", [])
+    # Only propose truly ELIGIBLE records for CRM staging approval! (V7-007)
+    eligible = [
+        s for s in preview.get("staged_records", [])
+        if s.get("eligible_for_crm_import") is True or s.get("action") == "STAGED_FOR_INSERT"
+    ]
+    if not eligible:
+        return StepOutcome(
+            status="done",
+            output={
+                "gate_status": "SKIPPED_NO_ELIGIBLE_RECORDS",
+                "detail": "Không có hồ sơ nào đủ điều kiện nhập CRM để trình phê duyệt.",
+                "eligible_count": 0,
+            }
+        )
+
+    companies_summary = ", ".join(s["company"] for s in eligible[:3])
+    hashes = [s.get("payload_hash", "")[:8] for s in eligible if s.get("payload_hash")]
+    hash_str = f", Hashes: {', '.join(hashes)}" if hashes else ""
     summary = (
-        f"Phê duyệt đưa {len(staged)} khách hàng tiềm năng đã xác thực & chấm điểm vào Zoho CRM "
-        f"(Dữ liệu an toàn, Write-mode: {preview.get('write_enabled')}). "
-        f"Doanh nghiệp hàng đầu: " + ", ".join(s["company"] for s in staged[:3])
+        f"Phê duyệt đưa {len(eligible)} khách hàng tiềm năng đã xác thực pháp nhân & khử trùng lặp vào Zoho CRM "
+        f"(Write-mode: {preview.get('write_enabled', False)}{hash_str}). "
+        f"Doanh nghiệp: {companies_summary}"
     )
-    return ctx.gate("workflow.stage_leads_for_crm", staged, summary)
+    return ctx.gate("workflow.stage_leads_for_crm", eligible, summary)
 
 
 def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
-    staged = ctx.outputs["crm_preview"].get("staged_records", [])
+    preview = ctx.outputs.get("crm_preview", {})
+    eligible = [
+        s for s in preview.get("staged_records", [])
+        if s.get("eligible_for_crm_import") is True or s.get("action") == "STAGED_FOR_INSERT"
+    ]
     return StepOutcome(status="done", output={
-        "approved_count": len(staged),
-        "stage_status": "APPROVED_FOR_CRM",
-        "staged_records": staged,
+        "approved_count": len(eligible),
+        "stage_status": "APPROVED_FOR_CRM" if eligible else "NO_ELIGIBLE_LEADS_STAGED",
+        "staged_records": eligible,
+        "all_preview_records": preview.get("staged_records", []),
         "crm_write_executed": False,
         "mode": "SAFE_CONTROLLED_STAGING"
     })

@@ -134,7 +134,10 @@ def run_e2e_demonstration():
     wf_run = engine.start(
         "gtm_lead_pipeline",
         "Chạy quy trình quét lead thiết bị y tế hàng không",
-        params={"limit": 3},
+        params={
+            "candidates": [c.model_dump(mode="json") for c in qualified_leads[:3]],
+            "limit": 3
+        },
         user_id="buzz:user:owner",
         channel_id="buzz:channel:gtm",
     )
@@ -189,6 +192,11 @@ def run_e2e_demonstration():
     delivery_dir_v6 = Path(r"C:\Users\Admin\BUZZ_GTM_V6_DELIVERY")
     delivery_dir_v6.mkdir(parents=True, exist_ok=True)
     delivery_out_v6 = delivery_dir_v6 / "e2e_simulation_report.json"
+    delivery_dir_v7 = Path(r"C:\Users\Admin\BUZZ_GTM_V7_DELIVERY")
+    delivery_dir_v7.mkdir(parents=True, exist_ok=True)
+    delivery_out_v7 = delivery_dir_v7 / "e2e_simulation_report.json"
+    delivery_out_v7.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
+
     delivery_out_v6.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
 
     delivery_dir_v5 = Path(r"C:\Users\Admin\BUZZ_GTM_V5_DELIVERY")

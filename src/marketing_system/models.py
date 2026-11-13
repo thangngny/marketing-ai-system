@@ -365,3 +365,77 @@ class ReadonlySyncResult(BaseModel):
     resource: str
     records: list[dict[str, Any]] = Field(default_factory=list)
     detail: str = ""
+
+
+DedupeDecisionStatus = Literal[
+    "DUPLICATE_CONFIRMED",
+    "POSSIBLE_DUPLICATE",
+    "NOT_FOUND_IN_CHECKED_SCOPE",
+    "PARTIAL_COVERAGE",
+    "CHECK_FAILED",
+    "NOT_CHECKED",
+    "STALE_RESULT",
+]
+
+
+class DedupeDecision(BaseModel):
+    """Per-entity Zoho deduplication decision with complete audit trail."""
+    lead_id: str | None = None
+    candidate_key: str
+    query_run_id: str
+    crm_organization: str = "Minh Van Logistics"
+    modules_checked: list[str] = Field(default_factory=lambda: ["Accounts"])
+    field_names_checked: list[str] = Field(default_factory=lambda: ["Account_Name", "Website", "VAT_Number"])
+    query_criteria: dict[str, Any] = Field(default_factory=dict)
+    query_status: Literal["SUCCESS", "PARTIAL", "FAILED", "SKIPPED"] = "SUCCESS"
+    matching_record_ids: list[str] = Field(default_factory=list)
+    match_confidence: float = 0.0
+    cache_used: bool = False
+    cache_age_seconds: float | None = None
+    checked_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime | None = None
+    decision_status: DedupeDecisionStatus = "NOT_CHECKED"
+    error_details: str | None = None
+    evidence_ref: str | None = None
+
+
+EligibilityStatus = Literal[
+    "APPROVED_FOR_STAGING",
+    "STAGED_FOR_INSERT",
+    "NEEDS_IDENTITY_VERIFICATION",
+    "NEEDS_CONTACT_ENRICHMENT",
+    "NEEDS_CRM_RECHECK",
+    "DUPLICATE_REVIEW",
+    "READY_FOR_HUMAN_REVIEW",
+    "REJECTED",
+]
+
+
+class ImportEligibilityDecision(BaseModel):
+    """Strict per-lead evaluation of CRM staging/import readiness."""
+    candidate_id: str
+    company: str
+    eligibility_status: EligibilityStatus
+    missing_fields: list[str] = Field(default_factory=list)
+    dedupe_decision_ref: str | None = None
+    identity_verified: bool = False
+    payload_hash: str = ""
+    eligible_for_crm_import: bool = False
+    reason: str = ""
+
+
+class BusinessEvent(BaseModel):
+    """Canonical business event emitted across GTM lifecycle."""
+    event_id: str = Field(default_factory=lambda: f"evt-{uuid4().hex[:12]}")
+    event_type: str
+    entity_id: str
+    workflow_id: str
+    environment: Environment = Environment.MOCK
+    synthetic: bool = False
+    source: str = "gtm_engine"
+    occurred_at: datetime = Field(default_factory=utc_now)
+    correlation_id: str = ""
+    evidence_ref: str | None = None
+    policy_version: str = "v7.0"
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+
