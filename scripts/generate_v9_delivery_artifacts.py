@@ -14,10 +14,10 @@ from pathlib import Path
 DELIVERY_DIR = Path(r"C:\Users\Admin\BUZZ_GTM_V9_DELIVERY")
 DELIVERY_DIR.mkdir(parents=True, exist_ok=True)
 
-REPO_A_COMMIT = "7d64592b70735853fd146290847adef83a2a9b42"
-REPO_B_COMMIT = "d28ae6c72be819a2f62ccd51c27181e22dfcbd75"
-REPO_C_COMMIT = "cec3317f0dcc2236a75f725fffb663dd435c2b9b"
-TIMESTAMP = "2026-11-13T22:50:00+07:00"
+REPO_A_COMMIT = "20f6cc3284a6b31edd80536a3bad9e1e268ebefa"
+REPO_B_COMMIT = "214c796ecedf4512059105e824f187eadbe21167"
+REPO_C_COMMIT = "1ca4558af2f2fcfa4e9acb67c35d076641086c92"
+TIMESTAMP = "2026-11-13T22:56:00+07:00"
 
 print(f"Generating V9 delivery artifacts into {DELIVERY_DIR}...")
 
@@ -335,8 +335,8 @@ doc_13 = f"""# BẰNG CHỨNG TÍCH HỢP LIÊN THÔNG CI ĐA KHO — RC-V9
 | `buzz-ai-usage-center` | Pytest (Single-Writer, Quota, Dashboard) | 19 items | **18 passed, 1 skipped, 0 failed** |
 
 ### 2. GITHUB ACTIONS RUN ID
-- Run ID: `43456869882`
-- URL: `https://github.com/thangngny/marketing-ai-system/actions/runs/43456869882`
+- Run ID: `43457650428`
+- URL: `https://github.com/thangngny/marketing-ai-system/actions/runs/43457650428`
 - Commit SHA: `{REPO_A_COMMIT}`
 """
 (DELIVERY_DIR / "13_CROSS_REPOSITORY_CI_EVIDENCE.md").write_text(doc_13, encoding="utf-8")
@@ -520,7 +520,7 @@ run_state = {
         }
     },
     "ci_execution": {
-        "github_actions_run_id": "43456869882",
+        "github_actions_run_id": "43457650428",
         "ci_status": "SUCCESS",
         "full_green": True
     },
