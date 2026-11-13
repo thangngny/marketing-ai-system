@@ -14,7 +14,7 @@ from pathlib import Path
 DELIVERY_DIR = Path(r"C:\Users\Admin\BUZZ_GTM_V8_DELIVERY")
 DELIVERY_DIR.mkdir(parents=True, exist_ok=True)
 
-REPO_A_COMMIT = "8a67f43"
+REPO_A_COMMIT = "b127c4f"
 REPO_B_COMMIT = "16e7786"
 REPO_C_COMMIT = "2613554"
 TIMESTAMP = "2026-11-13T22:00:00+07:00"
