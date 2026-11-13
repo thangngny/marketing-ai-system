@@ -378,7 +378,23 @@ def test_v8_006_event_immutability_and_conflict_detection(tmp_path):
 def _load_get_gtm_funnel_data():
     from pathlib import Path
     import re
-    dash_path = Path(__file__).resolve().parent.parent.parent / "buzz-ai-usage-center" / "bin" / "dashboard.py"
+    dash_path = None
+    try:
+        from conftest import get_sibling_workspace_path
+        dash_path = get_sibling_workspace_path("buzz-ai-usage-center/bin/dashboard.py")
+    except Exception:
+        dash_path = None
+    if not dash_path or not dash_path.exists():
+        dash_candidates = [
+            Path(__file__).resolve().parent.parent / "buzz-ai-usage-center" / "bin" / "dashboard.py",
+            Path(__file__).resolve().parent.parent.parent / "buzz-ai-usage-center" / "bin" / "dashboard.py",
+            Path(os.environ.get("BUZZ_BUZZ_AI_USAGE_CENTER_DIR", "")) / "bin" / "dashboard.py",
+        ]
+        for c in dash_candidates:
+            if c.exists():
+                dash_path = c
+                break
+    assert dash_path and dash_path.exists(), f"dashboard.py not found at {dash_path}"
     content = dash_path.read_text(encoding="utf-8")
     match = re.search(r"(def get_gtm_funnel_data\(.*?\)\s*->\s*dict:.*?)(?=def v_gtm_funnel)", content, re.DOTALL)
     assert match is not None, "get_gtm_funnel_data not found in dashboard.py"
