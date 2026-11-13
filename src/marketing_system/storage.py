@@ -9,6 +9,11 @@ from .constants import Environment
 from .models import BaseEntity, BusinessEvent
 
 
+class EventConflictError(ValueError):
+    """Raised when an attempt is made to overwrite an immutable business event with different payload."""
+    pass
+
+
 class StagingStore:
     def __init__(self, path: Path):
         self.path = path
@@ -77,9 +82,19 @@ class StagingStore:
         self.initialize()
         payload = event.model_dump(mode="json")
         with self.connect() as connection:
+            existing = connection.execute(
+                "SELECT payload_json FROM business_events WHERE event_id = ?", (event.event_id,)
+            ).fetchone()
+            if existing:
+                existing_payload = json.loads(existing["payload_json"])
+                if existing_payload == event.payload_json:
+                    return  # Idempotent re-recording
+                raise EventConflictError(
+                    f"Business event '{event.event_id}' already exists with different payload. Events are immutable."
+                )
             connection.execute(
                 """
-                INSERT OR REPLACE INTO business_events
+                INSERT INTO business_events
                     (event_id, event_type, entity_id, workflow_id, environment, synthetic,
                      source, occurred_at, correlation_id, evidence_ref, policy_version, payload_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -99,6 +114,86 @@ class StagingStore:
                     json.dumps(event.payload_json, ensure_ascii=False),
                 ),
             )
+
+    def persist_lead_with_events(self, entity: BaseEntity, events: list[BusinessEvent]) -> None:
+        """
+        Atomic persistence for a canonical entity and all associated business events in a single SQLite transaction.
+        If any event insertion or the entity upsert fails, the entire transaction is rolled back.
+        """
+        if entity.environment is not Environment.MOCK and entity.synthetic:
+            raise ValueError("Synthetic records may only be stored in the mock environment")
+        self.initialize()
+        payload = entity.model_dump(mode="json")
+        with self.connect() as connection:
+            # 1. Upsert canonical entity
+            existing = connection.execute(
+                "SELECT environment FROM canonical_records WHERE id = ?", (entity.id,)
+            ).fetchall()
+            if existing and any(row["environment"] != entity.environment.value for row in existing):
+                raise ValueError("Cross-environment record update refused")
+            connection.execute(
+                """
+                INSERT INTO canonical_records
+                    (id, entity_type, environment, source, correlation_id, synthetic,
+                     payload_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id, environment) DO UPDATE SET
+                    source=excluded.source,
+                    correlation_id=excluded.correlation_id,
+                    synthetic=excluded.synthetic,
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    entity.id,
+                    type(entity).__name__,
+                    entity.environment.value,
+                    entity.source,
+                    entity.correlation_id,
+                    int(entity.synthetic),
+                    json.dumps(payload, ensure_ascii=False),
+                    str(payload["created_at"]),
+                    str(payload["updated_at"]),
+                ),
+            )
+
+            # 2. Insert all business events in the same transaction
+            for event in events:
+                if event.environment is not Environment.MOCK and event.synthetic:
+                    raise ValueError("Synthetic business events may only be recorded in the mock environment")
+                ev_payload = event.model_dump(mode="json")
+                existing_ev = connection.execute(
+                    "SELECT payload_json FROM business_events WHERE event_id = ?", (event.event_id,)
+                ).fetchone()
+                if existing_ev:
+                    existing_data = json.loads(existing_ev["payload_json"])
+                    if existing_data == event.payload_json:
+                        continue  # Idempotent retry
+                    raise EventConflictError(
+                        f"Business event '{event.event_id}' already exists with different payload. Events are immutable."
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO business_events
+                        (event_id, event_type, entity_id, workflow_id, environment, synthetic,
+                         source, occurred_at, correlation_id, evidence_ref, policy_version, payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.event_id,
+                        event.event_type,
+                        event.entity_id,
+                        event.workflow_id,
+                        event.environment.value,
+                        int(event.synthetic),
+                        event.source,
+                        str(ev_payload["occurred_at"]),
+                        event.correlation_id,
+                        event.evidence_ref,
+                        event.policy_version,
+                        json.dumps(event.payload_json, ensure_ascii=False),
+                    ),
+                )
 
     def list_events(
         self,

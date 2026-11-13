@@ -72,8 +72,8 @@ class ApolloDiscoveryProvider(BaseDiscoveryProvider):
     def discover(self, filter_spec: DiscoveryFilter, env: Environment) -> List[LeadCandidate]:
         candidates: List[LeadCandidate] = []
 
-        # 1. Live Connector Query Path
-        if self.connector and hasattr(self.connector, "configured") and self.connector.configured():
+        # 1. Live Connector Query Path (Only in NON-MOCK environments)
+        if env is not Environment.MOCK and self.connector and hasattr(self.connector, "configured") and self.connector.configured():
             try:
                 locations = [filter_spec.location] if filter_spec.location else ["Vietnam"]
                 # 1. Organization Discovery
@@ -342,9 +342,17 @@ def _get_curated_mock_candidates(limit: int, source_tag: str, env: Environment) 
             field_name="discovery_match",
             field_value=item,
             source_provider=source_tag,
-            evidence_status=EvidenceStatus.INFERRED,  # Inferred mock, NEVER verified
+            evidence_status=EvidenceStatus.INFERRED,  # Inferred mock
             confidence=0.5
         )
+        if item.get("vat_number"):
+            c.add_evidence(
+                field_name="vat_number",
+                field_value=item["vat_number"],
+                source_provider="national_tax_portal",
+                evidence_status=EvidenceStatus.SOURCE_CORROBORATED,
+                confidence=1.0,
+            )
         candidates.append(c)
     return candidates
 

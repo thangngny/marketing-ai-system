@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from ..models import LeadCandidate
+from .approvals import payload_hash
 from .engine import StepContext, StepOutcome, WorkflowDefinition, WorkflowStep
 
 _BLOCKING = {"NEEDS_AUTH", "NEEDS_MFA", "NEEDS_API_ACCESS", "NOT_CONFIGURED", "NOT_IMPLEMENTED", "DENIED", "ERROR", "INVALID_INPUT"}
@@ -295,10 +296,10 @@ def step_gtm_crm_preview(ctx: StepContext) -> StepOutcome:
 
 def step_gtm_gate(ctx: StepContext) -> StepOutcome:
     preview = ctx.outputs["crm_preview"]
-    # Only propose truly ELIGIBLE records for CRM staging approval! (V7-007)
+    # Only propose truly ELIGIBLE records for CRM staging approval! (V8-004: strictly eligible_for_crm_import is True)
     eligible = [
         s for s in preview.get("staged_records", [])
-        if s.get("eligible_for_crm_import") is True or s.get("action") == "STAGED_FOR_INSERT"
+        if s.get("eligible_for_crm_import") is True
     ]
     if not eligible:
         return StepOutcome(
@@ -323,15 +324,44 @@ def step_gtm_gate(ctx: StepContext) -> StepOutcome:
 
 def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
     preview = ctx.outputs.get("crm_preview", {})
+    gate_out = ctx.outputs.get("approval_gate", {})
+
+    # If gate was skipped due to no eligible records
+    if gate_out.get("gate_status") == "SKIPPED_NO_ELIGIBLE_RECORDS":
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "SKIPPED_NO_ELIGIBLE_LEADS",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING"
+        })
+
+    approval_id = gate_out.get("approval_id") or (getattr(ctx, "workflow", {}) or {}).get("approval_id")
     eligible = [
         s for s in preview.get("staged_records", [])
-        if s.get("eligible_for_crm_import") is True or s.get("action") == "STAGED_FOR_INSERT"
+        if s.get("eligible_for_crm_import") is True
     ]
+    digest = payload_hash("workflow.stage_leads_for_crm", eligible)
+    approved_records = []
+
+    engine = getattr(ctx, "engine", None)
+    if engine and hasattr(engine, "approvals") and approval_id:
+        rec = engine.approvals.get(approval_id)
+        if rec and rec.status == "APPROVED" and rec.payload_hash == digest and not rec.expired():
+            approved_records = eligible
+    elif engine is None:
+        # Standalone step invocation (e.g. unit tests without engine harness)
+        approved_records = eligible
+
+    stage_status = "APPROVED_FOR_CRM" if approved_records else "NO_APPROVED_LEADS_STAGED"
+
     return StepOutcome(status="done", output={
-        "approved_count": len(eligible),
-        "stage_status": "APPROVED_FOR_CRM" if eligible else "NO_ELIGIBLE_LEADS_STAGED",
-        "staged_records": eligible,
+        "approved_count": len(approved_records),
+        "stage_status": stage_status,
+        "staged_records": approved_records,
         "all_preview_records": preview.get("staged_records", []),
+        "approval_id": approval_id,
         "crm_write_executed": False,
         "mode": "SAFE_CONTROLLED_STAGING"
     })

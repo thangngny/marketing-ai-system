@@ -19,7 +19,7 @@ from ..capabilities import KNOWN_BLOCKERS, connector_status
 from ..config import Settings
 from ..connectors import ConnectorRegistry
 from ..constants import ConnectorState, Impact, Environment
-from ..fixtures import mock_campaign_metrics, mock_crm_accounts, mock_logistics_leads
+from ..fixtures import mock_campaign_metrics, mock_crm_accounts, mock_crm_leads, mock_logistics_leads
 from ..models import EmailDraft, LeadCandidate, MetricSnapshot, TaskProposal
 from ..policy import PolicyEngine
 from ..workflows.approvals import ApprovalEngine, BuzzSignedEventVerifier
@@ -354,30 +354,78 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
         except Exception as exc:
             scope_checked.append(f"vat_cache_error:{exc}")
 
-    # 2. Query CRM connector for Accounts
+    # 2. Query CRM connector for Accounts and Leads (V8-001: True scope verification)
     names: dict[str, str] = {}
     domains: dict[str, str] = {}
+    modules_queried: list[str] = []
+    scanned = 0
+    bounded = False
+
     if getattr(rt, "mock", True) or connector is None:
         accounts = mock_crm_accounts()
-        names = {_norm(str(a["Account_Name"])): str(a["id"]) for a in accounts}
-        domains = {_norm(str(a["Website"])): str(a["id"]) for a in accounts}
-        scanned = len(accounts)
+        leads = mock_crm_leads()
+        for a in accounts:
+            a_name = a.get("Account_Name") or a.get("name") or ""
+            a_dom = a.get("Website") or a.get("domain") or ""
+            if a_name:
+                names[_norm(str(a_name))] = str(a.get("id"))
+            if a_dom:
+                domains[_norm(str(a_dom))] = str(a.get("id"))
+        for l in leads:
+            l_name = l.get("Company") or l.get("company") or ""
+            l_dom = l.get("Website") or l.get("domain") or ""
+            if l_name and _norm(str(l_name)) not in names:
+                names[_norm(str(l_name))] = str(l.get("id"))
+            if l_dom and _norm(str(l_dom)) not in domains:
+                domains[_norm(str(l_dom))] = str(l.get("id"))
+        scanned = len(accounts) + len(leads)
         bounded = False
-        scope_checked.append("mock_accounts")
+        modules_queried = ["Accounts", "Leads"]
+        scope_checked.extend(["mock_accounts", "mock_leads"])
     else:
+        corr_id = getattr(getattr(rt, "ctx", None), "correlation_id", "corr-dedupe")
+        scanned_accounts = 0
+        scanned_leads = 0
+        bounded_accounts = False
+        bounded_leads = False
+
+        # Query Accounts module
         try:
-            corr_id = getattr(getattr(rt, "ctx", None), "correlation_id", "corr-dedupe")
-            rows = _dump(connector.read("accounts", limit=200, correlation_id=corr_id))
-            names = {_norm(r.get("name") or ""): str(r.get("external_id") or r.get("id", "")) for r in rows if r.get("name")}
-            domains = {_norm(r.get("domain") or ""): str(r.get("external_id") or r.get("id", "")) for r in rows if r.get("domain")}
-            scanned = len(rows)
-            bounded = (scanned >= 200)
+            acc_rows = _dump(connector.read("accounts", limit=200, correlation_id=corr_id))
+            for r in acc_rows:
+                if r.get("name"):
+                    names[_norm(str(r["name"]))] = str(r.get("external_id") or r.get("id", ""))
+                if r.get("domain"):
+                    domains[_norm(str(r["domain"]))] = str(r.get("external_id") or r.get("id", ""))
+            scanned_accounts = len(acc_rows)
+            bounded_accounts = (scanned_accounts >= 200)
+            modules_queried.append("Accounts")
             scope_checked.append("zoho_accounts_api")
         except Exception as exc:
-            api_error = str(exc)
-            names = {}
-            domains = {}
-            scope_checked.append(f"zoho_error:{exc}")
+            api_error = f"Accounts query failed: {exc}"
+            scope_checked.append(f"zoho_accounts_error:{exc}")
+
+        # Query Leads module
+        try:
+            lead_rows = _dump(connector.read("leads", limit=200, correlation_id=corr_id))
+            for r in lead_rows:
+                cname = r.get("company") or r.get("name")
+                cdom = r.get("domain") or r.get("website")
+                if cname and _norm(str(cname)) not in names:
+                    names[_norm(str(cname))] = str(r.get("external_id") or r.get("id", ""))
+                if cdom and _norm(str(cdom)) not in domains:
+                    domains[_norm(str(cdom))] = str(r.get("external_id") or r.get("id", ""))
+            scanned_leads = len(lead_rows)
+            bounded_leads = (scanned_leads >= 200)
+            modules_queried.append("Leads")
+            scope_checked.append("zoho_leads_api")
+        except Exception as exc:
+            lead_err = f"Leads query failed: {exc}"
+            api_error = f"{api_error}; {lead_err}" if api_error else lead_err
+            scope_checked.append(f"zoho_leads_error:{exc}")
+
+        scanned = scanned_accounts + scanned_leads
+        bounded = bounded_accounts or bounded_leads
 
     for company in args.companies:
         n_comp = _norm(company)
@@ -391,8 +439,10 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
     run_id = f"dedupe-{uuid.uuid4().hex[:8]}"
     check_time = utc_now()
 
-    # 3. Generate Independent Per-Entity Dedupe Decisions (V7-001 & V7-002)
+    # 3. Generate Independent Per-Entity Dedupe Decisions (V8-001 & V8-002)
     decisions: dict[str, dict[str, Any]] = {}
+    is_comprehensive_scope = ("Accounts" in modules_queried and "Leads" in modules_queried and not bounded and not api_error)
+
     for comp in args.companies:
         matched_id = matches.get(comp)
         if matched_id:
@@ -407,11 +457,11 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             q_status = "FAILED"
             err = api_error
             matched_ids = []
-        elif bounded and not has_vat_cache:
+        elif not is_comprehensive_scope:
             dec_status = "PARTIAL_COVERAGE"
             confidence = 0.5
             q_status = "PARTIAL"
-            err = "Zoho search bounded (200 records); scope incomplete"
+            err = "Zoho search scope incomplete (bounded or missing required modules)"
             matched_ids = []
         else:
             dec_status = "NOT_FOUND_IN_CHECKED_SCOPE"
@@ -424,7 +474,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             candidate_key=comp,
             query_run_id=run_id,
             crm_organization="Minh Van Logistics",
-            modules_checked=["Accounts", "Leads"] if not getattr(rt, "mock", True) else ["mock_accounts"],
+            modules_checked=list(modules_queried),
             field_names_checked=["Account_Name", "Website", "VAT_Number"],
             query_criteria={"company": comp},
             query_status=q_status,
@@ -447,12 +497,12 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
         batch_match_status = "CHECK_FAILED"
     elif "PARTIAL_COVERAGE" in all_statuses:
         batch_match_status = "PARTIAL_COVERAGE"
-    elif all_statuses == {"NOT_FOUND_IN_CHECKED_SCOPE"}:
+    elif all_statuses.issubset({"NOT_FOUND_IN_CHECKED_SCOPE", "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE"}):
         batch_match_status = "NOT_FOUND_VERIFIED"
     else:
-        batch_match_status = "PARTIAL_COVERAGE" if bounded else "NOT_FOUND_VERIFIED"
+        batch_match_status = "PARTIAL_COVERAGE" if (bounded or not is_comprehensive_scope) else "NOT_FOUND_VERIFIED"
 
-    coverage_status = "FULL_COVERAGE" if (has_vat_cache or not bounded) and not api_error else "PARTIAL_COVERAGE"
+    coverage_status = "FULL_COVERAGE" if is_comprehensive_scope else "PARTIAL_COVERAGE"
 
     return {
         "matches": matches,
@@ -463,6 +513,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
         "match_status": batch_match_status,
         "coverage_status": coverage_status,
         "scope_checked": scope_checked,
+        "modules_checked": list(modules_queried),
         "run_id": run_id,
         "timestamp": check_time.isoformat(),
     }
@@ -511,9 +562,18 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
         dom = str(lead.get("domain") or "").strip()
         raw_vat = str(lead.get("vat_number") or "").strip()
 
-        # Retrieve per-entity dedupe decision
+        # Trusted Dedupe Decision Resolver (V8-002: NEVER accept untrusted caller override)
         lead_dedupe_dec = decisions.get(comp, {})
-        dedupe_status = lead.get("crm_dedupe_status") or lead_dedupe_dec.get("decision_status") or dedupe_res.get("match_status", "NOT_CHECKED")
+        trusted_status = lead_dedupe_dec.get("decision_status")
+        caller_status = lead.get("crm_dedupe_status")
+
+        # Caller can NEVER self-certify as clean/verified.
+        # Only authoritative internal decision from crm_find_existing can clear a record.
+        if caller_status in ("PARTIAL_COVERAGE", "CHECK_FAILED", "STALE_RESULT", "DUPLICATE_CONFIRMED"):
+            # Upstream failure/partial signals are honored conservatively
+            dedupe_status = caller_status if trusted_status in (None, "NOT_CHECKED", "NOT_FOUND_IN_CHECKED_SCOPE", "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE") else trusted_status
+        else:
+            dedupe_status = trusted_status or dedupe_res.get("match_status", "NOT_CHECKED")
 
         # Check duplicate matches
         matched_id = matches.get(comp) or (matches.get(dom) if dom else None) or (matches.get(raw_vat) if raw_vat else None)
@@ -568,13 +628,21 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
         dq_score = lead.get("data_quality_score", 0)
         cf_score = lead.get("commercial_fit_score", 0)
 
-        # Check if legal entity is verified through evidence
+        # Check if legal entity is verified through authoritative evidence (V8-003)
+        # Format/checksum (vat_ok) alone is NOT legal entity verification!
         evidence_items = lead.get("evidence", [])
-        legal_verified = any(
-            (isinstance(e, dict) and e.get("field_name") in ("vat_number", "legal_name", "business_registration")
-             and e.get("status") in ("SOURCE_OBSERVED", "SOURCE_CORROBORATED"))
-            for e in evidence_items
-        ) or vat_ok
+        has_authoritative_registry = False
+        for e in evidence_items:
+            if not isinstance(e, dict):
+                continue
+            ef = e.get("field_name")
+            es = e.get("evidence_status") or e.get("status")
+            if ef in ("vat_number", "legal_name", "business_registration"):
+                if es in ("VERIFIED", "SOURCE_CORROBORATED"):
+                    has_authoritative_registry = True
+                    break
+
+        legal_verified = vat_ok and (has_authoritative_registry or lead.get("registry_verified") is True)
 
         # Determine strict eligibility and action (V7-003)
         if dedupe_status in ("CHECK_FAILED", "STALE_RESULT"):
@@ -822,10 +890,16 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
                     score_reason=cand.score_reason,
                     qualification=cand.stage,
                 )
-                storage.upsert(lead_entity)
 
-                # Record canonical business events
-                storage.record_event(BusinessEvent(
+                # Dedupe outcome distinction for business event truth (V8-006)
+                if cand.crm_dedupe_status in ("NOT_FOUND_VERIFIED", "DUPLICATE_CONFIRMED"):
+                    dedupe_outcome = "SUCCESS"
+                elif cand.crm_dedupe_status == "CHECK_FAILED":
+                    dedupe_outcome = "FAILED"
+                else:
+                    dedupe_outcome = "PARTIAL"
+
+                ev_discovered = BusinessEvent(
                     event_type="lead.discovered",
                     entity_id=stable_id,
                     workflow_id=getattr(rt.ctx, "workflow_id", "") or rt.ctx.correlation_id,
@@ -841,9 +915,9 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
                         "data_quality_score": cand.data_quality_score,
                         "commercial_fit_score": cand.commercial_fit_score,
                     }
-                ))
+                )
 
-                storage.record_event(BusinessEvent(
+                ev_dedupe = BusinessEvent(
                     event_type="lead.crm_dedupe_completed",
                     entity_id=stable_id,
                     workflow_id=getattr(rt.ctx, "workflow_id", "") or rt.ctx.correlation_id,
@@ -857,8 +931,12 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
                         "dedupe_status": cand.crm_dedupe_status,
                         "in_crm": cand.in_crm,
                         "run_id": dedupe_res.get("run_id"),
+                        "outcome": dedupe_outcome,
                     }
-                ))
+                )
+
+                # Atomic persistence of canonical entity and all business events (V8-005)
+                storage.persist_lead_with_events(lead_entity, [ev_discovered, ev_dedupe])
         except Exception as store_err:
             logger.error("Failed to store canonical lead entity: %s", store_err)
             raise store_err

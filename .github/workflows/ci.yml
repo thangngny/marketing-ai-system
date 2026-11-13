@@ -25,7 +25,6 @@ jobs:
 
       - name: Checkout Buzz Enterprise Suite (Cross-repo Integration)
         uses: actions/checkout@v4
-        continue-on-error: true
         with:
           repository: thangngny/Buzz-Marketing-OS-Enterprise-Suite
           ref: feature/gtm-enterprise-v3
@@ -33,7 +32,6 @@ jobs:
 
       - name: Checkout Buzz Usage Center (Cross-repo Integration)
         uses: actions/checkout@v4
-        continue-on-error: true
         with:
           repository: thangngny/buzz-ai-usage-center
           ref: feature/gtm-enterprise-v3

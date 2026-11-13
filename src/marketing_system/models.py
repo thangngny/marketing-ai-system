@@ -370,6 +370,7 @@ class ReadonlySyncResult(BaseModel):
 DedupeDecisionStatus = Literal[
     "DUPLICATE_CONFIRMED",
     "POSSIBLE_DUPLICATE",
+    "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE",
     "NOT_FOUND_IN_CHECKED_SCOPE",
     "PARTIAL_COVERAGE",
     "CHECK_FAILED",
@@ -386,6 +387,8 @@ class DedupeDecision(BaseModel):
     crm_organization: str = "Minh Van Logistics"
     modules_checked: list[str] = Field(default_factory=lambda: ["Accounts"])
     field_names_checked: list[str] = Field(default_factory=lambda: ["Account_Name", "Website", "VAT_Number"])
+    search_method: str = "targeted_search"
+    request_id: str | None = None
     query_criteria: dict[str, Any] = Field(default_factory=dict)
     query_status: Literal["SUCCESS", "PARTIAL", "FAILED", "SKIPPED"] = "SUCCESS"
     matching_record_ids: list[str] = Field(default_factory=list)
