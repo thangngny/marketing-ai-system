@@ -186,6 +186,11 @@ def run_e2e_demonstration():
     demo_artifacts["step9_dossier"] = dossier.model_dump(mode="json")
 
     # Save output to delivery folders
+    delivery_dir_v6 = Path(r"C:\Users\Admin\BUZZ_GTM_V6_DELIVERY")
+    delivery_dir_v6.mkdir(parents=True, exist_ok=True)
+    delivery_out_v6 = delivery_dir_v6 / "e2e_simulation_report.json"
+    delivery_out_v6.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
+
     delivery_dir_v5 = Path(r"C:\Users\Admin\BUZZ_GTM_V5_DELIVERY")
     delivery_dir_v5.mkdir(parents=True, exist_ok=True)
     delivery_out_v5 = delivery_dir_v5 / "e2e_simulation_report.json"
@@ -196,7 +201,7 @@ def run_e2e_demonstration():
     (delivery_dir_v4 / "e2e_simulation_report.json").write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\n================================================================================")
-    print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {delivery_out_v5}")
+    print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {delivery_out_v6}")
     print(f"================================================================================\n")
 
 
