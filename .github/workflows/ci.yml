@@ -1,0 +1,93 @@
+name: Buzz GTM AI - Continuous Integration & Production Invariant Audit
+
+on:
+  push:
+    branches:
+      - main
+      - marketing-system-phase1
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - marketing-system-phase1
+
+jobs:
+  test-and-verify:
+    name: Pytest & 12 Production Invariants
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+
+    steps:
+      - name: Checkout marketing-ai-system
+        uses: actions/checkout@v4
+
+      - name: Checkout Buzz Enterprise Suite (Cross-repo Integration)
+        uses: actions/checkout@v4
+        with:
+          repository: thangngny/Buzz-Marketing-OS-Enterprise-Suite
+          ref: feature/gtm-enterprise-v3
+          path: Buzz-Marketing-OS-Enterprise-Suite
+
+      - name: Checkout Buzz Usage Center (Cross-repo Integration)
+        uses: actions/checkout@v4
+        with:
+          repository: thangngny/buzz-ai-usage-center
+          ref: feature/gtm-enterprise-v3
+          path: buzz-ai-usage-center
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-cov pypiwin32 requests tzdata
+
+      - name: Verify Code Compilation
+        run: |
+          python -m compileall src tests
+
+      - name: Run Full Test Suite (Unit, Integration, Resilience)
+        env:
+          ENVIRONMENT: sandbox
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+          BUZZ_BUZZ_AI_USAGE_CENTER_DIR: ${{ github.workspace }}/buzz-ai-usage-center
+          BUZZ_BUZZ_MARKETING_OS_ENTERPRISE_SUITE_DIR: ${{ github.workspace }}/Buzz-Marketing-OS-Enterprise-Suite
+        run: |
+          python -m pytest -v tests/
+
+      - name: Verify 12 Production Invariants & V4-V10 Defect Remediations
+        env:
+          ENVIRONMENT: production
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+          BUZZ_BUZZ_AI_USAGE_CENTER_DIR: ${{ github.workspace }}/buzz-ai-usage-center
+          BUZZ_BUZZ_MARKETING_OS_ENTERPRISE_SUITE_DIR: ${{ github.workspace }}/Buzz-Marketing-OS-Enterprise-Suite
+        run: |
+          python -m pytest -v tests/test_v4_production_invariants.py tests/test_v4_reproduce_defects.py tests/test_v8_defect_reproduction.py tests/test_v8_remediation_and_adversarial_suite.py tests/test_v9_remediation_and_adversarial_suite.py tests/test_v10_remediation_and_adversarial_suite.py
+
+      - name: Verify Cross-Repository Behavioral Test Suites
+        env:
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+        run: |
+          python -m pytest -v Buzz-Marketing-OS-Enterprise-Suite/test_e2e_full.py Buzz-Marketing-OS-Enterprise-Suite/03-Marketing-Hub/test_hub.py
+          python -m pytest -v buzz-ai-usage-center/tests/
+
+      - name: Execute End-to-End Behavioral Demonstration Pipeline
+        env:
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+        run: |
+          python scripts/e2e_gtm_demonstration.py

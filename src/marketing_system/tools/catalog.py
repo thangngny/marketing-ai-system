@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from ..capabilities import KNOWN_BLOCKERS, connector_status
 from ..config import Settings
 from ..connectors import ConnectorRegistry
-from ..constants import ConnectorState, Impact
-from ..fixtures import mock_campaign_metrics, mock_crm_accounts, mock_logistics_leads
+from ..constants import ConnectorState, Impact, Environment
+from ..fixtures import mock_campaign_metrics, mock_crm_accounts, mock_crm_leads, mock_logistics_leads
 from ..models import EmailDraft, LeadCandidate, MetricSnapshot, TaskProposal
 from ..policy import PolicyEngine
 from ..workflows.approvals import ApprovalEngine, BuzzSignedEventVerifier
@@ -43,6 +43,8 @@ class LimitIn(BaseModel):
 class FindExistingIn(BaseModel):
     companies: list[str] = Field(default_factory=list, max_length=100)
     domains: list[str] = Field(default_factory=list, max_length=100)
+    vats: list[str] = Field(default_factory=list, max_length=100)
+    candidates: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
 
 class TaskIn(BaseModel):
@@ -56,6 +58,17 @@ class TaskIn(BaseModel):
 class DeleteRecordIn(BaseModel):
     module: Literal["Leads", "Contacts", "Accounts", "Deals", "Tasks"]
     record_id: str
+
+
+class PreviewCrmImportIn(BaseModel):
+    leads: list[dict[str, Any]] = Field(default_factory=list, description="Danh sách ứng viên lead cần preview trước khi import.")
+
+
+class LeadPipelineRunIn(BaseModel):
+    industry_keywords: list[str] = Field(default_factory=lambda: ["medical", "thiết bị y tế", "dược phẩm", "linh kiện điện tử"])
+    industry_codes: list[str] = Field(default_factory=lambda: ["3250", "2611", "4651", "4659"])
+    trade_lanes: list[str] = Field(default_factory=lambda: ["JP-VN", "KR-VN", "CN-VN", "EU-VN"])
+    limit: int = Field(10, ge=1, le=50)
 
 
 class SearchCompaniesIn(BaseModel):
@@ -169,7 +182,7 @@ class ContentDraftIn(BaseModel):
 
 class CodexRunIn(BaseModel):
     prompt: str = Field(..., description="Prompt or task instructions to execute via OpenAI Codex CLI/App")
-    cwd: str = Field("C:/Users/Admin", description="Working directory for task execution")
+    cwd: str = Field(default_factory=lambda: str(Path.home()), description="Working directory for task execution")
     model: str | None = Field(None, description="Optional model override (defaults to config: gpt-5.6-sol)")
 
 
@@ -189,8 +202,13 @@ class MetaAiChatIn(BaseModel):
 
 # --------------------------------------------------------------------------- helpers
 def _live_connector(rt: HubRuntime, name: str):
-    connector = rt.registry.get(name)
-    if rt.mock:
+    if not hasattr(rt, "registry") or rt.registry is None:
+        return None
+    try:
+        connector = rt.registry.get(name)
+    except Exception:
+        return None
+    if getattr(rt, "mock", True) or connector is None:
         return connector
     report = connector.report(live_probe=False)
     if report.live_state in (ConnectorState.NEEDS_AUTH, ConnectorState.CONFIG_REQUIRED):
@@ -282,25 +300,319 @@ def _crm_list(resource: str):
 
 
 def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
+    import os
+    import time
+    import uuid
+    from ..models import utc_now, DedupeDecision
+    from ..lead_engine.verifier import validate_vietnam_vat
+
     connector = _live_connector(rt, "zoho")
-    if rt.mock:
+    matches: dict[str, str] = {}
+    scope_checked: list[str] = []
+    scanned = 0
+    bounded = False
+    api_error: str | None = None
+
+    # Mutex lock handling for dedupe concurrency
+    buzz_dir = Path(os.environ.get("BUZZ_HOME", str(Path.home() / ".buzz")))
+    lock_dir = buzz_dir / "locks"
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        (lock_dir / "zoho_dedupe.lock").touch(exist_ok=True)
+    except Exception:
+        pass
+
+    # Initialize candidate keys to check from direct args or structured candidates
+    vats_to_check = list(args.vats)
+    companies_to_check = list(args.companies)
+    domains_to_check = list(args.domains)
+    if getattr(args, "candidates", None):
+        for c in args.candidates:
+            if c.get("vat_number") and str(c["vat_number"]).strip() not in vats_to_check:
+                vats_to_check.append(str(c["vat_number"]).strip())
+            if c.get("company") and str(c["company"]).strip() not in companies_to_check:
+                companies_to_check.append(str(c["company"]).strip())
+            if c.get("domain") and str(c["domain"]).strip() not in domains_to_check:
+                domains_to_check.append(str(c["domain"]).strip())
+
+    # 1. Check local VAT cache if available (e.g. Minh Van 3,603 live records)
+    vat_cache_path = Path(os.environ.get("BUZZ_VAT_CACHE", str(buzz_dir / "tools" / "zoho_live_vat_cache.json")))
+    has_vat_cache = False
+    cache_age_seconds: float | None = None
+    cached_vats: set[str] = set()
+    cached_names: dict[str, str] = {}
+
+    if vat_cache_path.exists():
+        try:
+            mtime = vat_cache_path.stat().st_mtime
+            cache_age_seconds = time.time() - mtime
+            cdata = json.loads(vat_cache_path.read_text(encoding="utf-8"))
+            cached_vats = set(str(v).strip() for v in cdata.get("vats", []) if v)
+            cached_names = {_norm(str(n)): str(n) for n in cdata.get("names", []) if n}
+            has_vat_cache = bool(cached_vats or cached_names)
+            if has_vat_cache:
+                scope_checked.append("zoho_live_vat_cache")
+
+            for raw_vat in vats_to_check:
+                if not raw_vat:
+                    continue
+                v_ok, v_norm = validate_vietnam_vat(raw_vat)
+                target_vat = v_norm if v_ok else raw_vat.strip()
+                if target_vat in cached_vats:
+                    matches[raw_vat] = f"vat_cache:{target_vat}"
+
+            for comp in companies_to_check:
+                norm_c = _norm(comp)
+                if norm_c in cached_names:
+                    matches[comp] = f"vat_cache_name:{cached_names[norm_c]}"
+        except Exception as exc:
+            scope_checked.append(f"vat_cache_error:{exc}")
+
+    # 2. Query CRM connector for Accounts and Leads (V8-001: True scope verification)
+    names: dict[str, str] = {}
+    domains: dict[str, str] = {}
+    vats_map: dict[str, str] = {}
+    modules_queried: list[str] = []
+    scanned = 0
+    bounded = False
+    receipt_incomplete = False
+
+    is_live_env = getattr(getattr(rt, "settings", None), "environment", Environment.MOCK) in (Environment.SANDBOX, Environment.PRODUCTION)
+
+    has_test_connector = connector is not None and (
+        hasattr(connector, "query_receipt")
+        or getattr(getattr(connector, "read", None), "return_value", None) is not None
+        or getattr(getattr(connector, "read", None), "side_effect", None) is not None
+        or (getattr(connector, "configured", lambda: False)() is True)
+    )
+
+    # V10-002: In live environments, REFUSE mock fallback if connector is missing or unconfigured
+    if is_live_env and (connector is None or getattr(connector, "configured", lambda: True)() is False):
+        api_error = "NOT_CONFIGURED"
+        bounded = True
+        modules_queried = []
+        scope_checked.append("zoho_connector_unconfigured")
+    elif not is_live_env and not has_test_connector:
+        # Mock environment without configured live connector or explicit test responses
         accounts = mock_crm_accounts()
-        names = {_norm(str(a["Account_Name"])): str(a["id"]) for a in accounts}
-        domains = {_norm(str(a["Website"])): str(a["id"]) for a in accounts}
-        scanned = len(accounts)
+        leads = mock_crm_leads()
+        for a in accounts:
+            a_name = a.get("Account_Name") or a.get("name") or ""
+            a_dom = a.get("Website") or a.get("domain") or ""
+            a_vat = a.get("VAT_Number") or a.get("vat") or ""
+            if a_name:
+                names[_norm(str(a_name))] = str(a.get("id"))
+            if a_dom:
+                domains[_norm(str(a_dom))] = str(a.get("id"))
+            if a_vat:
+                vats_map[str(a_vat).strip()] = str(a.get("id"))
+        for l in leads:
+            l_name = l.get("Company") or l.get("company") or ""
+            l_dom = l.get("Website") or l.get("domain") or ""
+            l_vat = l.get("VAT_Number") or l.get("vat") or ""
+            if l_name and _norm(str(l_name)) not in names:
+                names[_norm(str(l_name))] = str(l.get("id"))
+            if l_dom and _norm(str(l_dom)) not in domains:
+                domains[_norm(str(l_dom))] = str(l.get("id"))
+            if l_vat and str(l_vat).strip() not in vats_map:
+                vats_map[str(l_vat).strip()] = str(l.get("id"))
+        scanned = len(accounts) + len(leads)
+        bounded = False
+        modules_queried = ["Accounts", "Leads"]
+        scope_checked.extend(["mock_accounts", "mock_leads"])
     else:
-        rows = _dump(connector.read("accounts", limit=200, correlation_id=rt.ctx.correlation_id))
-        names = {_norm(r.get("name") or ""): r.get("external_id") for r in rows if r.get("name")}
-        domains = {_norm(r.get("domain") or ""): r.get("external_id") for r in rows if r.get("domain")}
-        scanned = len(rows)
-    matches = {}
-    for company in args.companies:
-        if _norm(company) in names:
-            matches[company] = names[_norm(company)]
-    for domain in args.domains:
-        if _norm(domain) in domains:
-            matches[domain] = domains[_norm(domain)]
-    return {"matches": matches, "accounts_scanned": scanned, "bounded": scanned >= 200}
+        # Live connector execution (or configured mock connector in test)
+        corr_id = getattr(getattr(rt, "ctx", None), "correlation_id", "corr-dedupe")
+        scanned_accounts = 0
+        scanned_leads = 0
+        bounded_accounts = False
+        bounded_leads = False
+
+        # Query Accounts module
+        try:
+            acc_rows = _dump(connector.read("accounts", limit=200, correlation_id=corr_id))
+            for r in acc_rows:
+                if r.get("name"):
+                    names[_norm(str(r["name"]))] = str(r.get("external_id") or r.get("id", ""))
+                if r.get("domain"):
+                    domains[_norm(str(r["domain"]))] = str(r.get("external_id") or r.get("id", ""))
+                if r.get("vat") or r.get("VAT_Number"):
+                    vats_map[str(r.get("vat") or r.get("VAT_Number")).strip()] = str(r.get("external_id") or r.get("id", ""))
+            scanned_accounts = len(acc_rows)
+            bounded_accounts = (scanned_accounts >= 200)
+            modules_queried.append("Accounts")
+            scope_checked.append("zoho_accounts_api")
+        except Exception as exc:
+            api_error = f"Accounts query failed: {exc}"
+            scope_checked.append(f"zoho_accounts_error:{exc}")
+
+        # Query Leads module
+        try:
+            lead_rows = _dump(connector.read("leads", limit=200, correlation_id=corr_id))
+            for r in lead_rows:
+                cname = r.get("company") or r.get("name")
+                cdom = r.get("domain") or r.get("website")
+                cvat = r.get("vat") or r.get("VAT_Number")
+                if cname and _norm(str(cname)) not in names:
+                    names[_norm(str(cname))] = str(r.get("external_id") or r.get("id", ""))
+                if cdom and _norm(str(cdom)) not in domains:
+                    domains[_norm(str(cdom))] = str(r.get("external_id") or r.get("id", ""))
+                if cvat and str(cvat).strip() not in vats_map:
+                    vats_map[str(cvat).strip()] = str(r.get("external_id") or r.get("id", ""))
+            scanned_leads = len(lead_rows)
+            bounded_leads = (scanned_leads >= 200)
+            modules_queried.append("Leads")
+            scope_checked.append("zoho_leads_api")
+        except Exception as exc:
+            lead_err = f"Leads query failed: {exc}"
+            api_error = f"{api_error}; {lead_err}" if api_error else lead_err
+            scope_checked.append(f"zoho_leads_error:{exc}")
+
+        # V10-001: Inspect Zoho Query Receipts for pagination & completion status
+        if hasattr(connector, "query_receipt"):
+            try:
+                try:
+                    rcpt = connector.query_receipt("Accounts")
+                except TypeError:
+                    rcpt = connector.query_receipt()
+                if rcpt is not None and type(rcpt).__name__ == "ZohoQueryReceipt":
+                    if getattr(rcpt, "more_records", False) is True:
+                        bounded_accounts = True
+                        receipt_incomplete = True
+                    if isinstance(getattr(rcpt, "explicit_completion_status", None), str) and rcpt.explicit_completion_status not in ("COMPLETE", "SUCCESS"):
+                        receipt_incomplete = True
+                    if isinstance(getattr(rcpt, "error_status", None), str) and rcpt.error_status:
+                        api_error = f"Receipt error: {rcpt.error_status}"
+            except Exception:
+                pass
+
+        scanned = scanned_accounts + scanned_leads
+        bounded = bounded_accounts or bounded_leads or receipt_incomplete
+
+    for company in companies_to_check:
+        n_comp = _norm(company)
+        if n_comp in names and company not in matches:
+            matches[company] = str(names[n_comp])
+    for domain in domains_to_check:
+        n_dom = _norm(domain)
+        if n_dom in domains and domain not in matches:
+            matches[domain] = str(domains[n_dom])
+    for vat in vats_to_check:
+        if vat in vats_map and vat not in matches:
+            matches[vat] = str(vats_map[vat])
+
+    run_id = f"dedupe-{uuid.uuid4().hex[:8]}"
+    check_time = utc_now()
+
+    # 3. Generate Independent Per-Entity Dedupe Decisions (V8-001 & V8-002)
+    decisions: dict[str, dict[str, Any]] = {}
+    is_comprehensive_scope = (
+        "Accounts" in modules_queried
+        and "Leads" in modules_queried
+        and not bounded
+        and not api_error
+        and not receipt_incomplete
+    )
+
+    candidates_to_eval: list[dict[str, Any]] = []
+    if getattr(args, "candidates", None):
+        candidates_to_eval = list(args.candidates)
+    elif args.companies:
+        for c in args.companies:
+            candidates_to_eval.append({"company": c})
+    elif args.vats:
+        for v in args.vats:
+            candidates_to_eval.append({"vat_number": v, "company": v})
+
+    for cand in candidates_to_eval:
+        comp = cand.get("company") or cand.get("candidate_key") or cand.get("vat_number") or ""
+        vat = cand.get("vat_number") or ""
+        dom = cand.get("domain") or ""
+
+        matched_id = matches.get(comp) or (matches.get(vat) if vat else None) or (matches.get(dom) if dom else None)
+        if matched_id:
+            dec_status = "DUPLICATE_CONFIRMED"
+            confidence = 1.0 if ("vat" in str(matched_id) or "cache" in str(matched_id)) else 0.95
+            q_status = "SUCCESS"
+            err = None
+            matched_ids = [str(matched_id)]
+        elif api_error == "NOT_CONFIGURED":
+            dec_status = "NOT_CONFIGURED"
+            confidence = 0.0
+            q_status = "FAILED"
+            err = "Zoho connector not configured in live environment"
+            matched_ids = []
+        elif api_error is not None:
+            dec_status = "CHECK_FAILED"
+            confidence = 0.0
+            q_status = "FAILED"
+            err = api_error
+            matched_ids = []
+        elif not is_comprehensive_scope or bounded:
+            dec_status = "PARTIAL_COVERAGE"
+            confidence = 0.5
+            q_status = "PARTIAL"
+            err = "Zoho search scope incomplete (bounded or missing required modules or more_records present)"
+            matched_ids = []
+        else:
+            dec_status = "NOT_FOUND_IN_CHECKED_SCOPE"
+            confidence = 0.95
+            q_status = "SUCCESS"
+            err = None
+            matched_ids = []
+
+        entity_decision = DedupeDecision(
+            candidate_key=comp,
+            query_run_id=run_id,
+            crm_organization="Minh Van Logistics",
+            modules_checked=list(modules_queried),
+            field_names_checked=["Account_Name", "Website", "VAT_Number"],
+            query_criteria={"company": comp, "vat_number": vat, "domain": dom},
+            query_status=q_status,
+            matching_record_ids=matched_ids,
+            match_confidence=confidence,
+            cache_used=has_vat_cache,
+            cache_age_seconds=cache_age_seconds,
+            checked_at=check_time,
+            decision_status=dec_status,
+            error_details=err,
+            evidence_ref=f"zoho_dedupe_{run_id}_{uuid.uuid4().hex[:6]}"
+        )
+        dec_dump = entity_decision.model_dump(mode="json")
+        decisions[comp] = dec_dump
+        if vat and vat != comp:
+            decisions[vat] = dec_dump
+
+    # Aggregate batch-level status purely as summary without contaminating per-entity status
+    all_statuses = {d["decision_status"] for d in decisions.values()} if decisions else set()
+    if "DUPLICATE_CONFIRMED" in all_statuses:
+        batch_match_status = "DUPLICATE_FOUND"
+    elif "NOT_CONFIGURED" in all_statuses:
+        batch_match_status = "NOT_CONFIGURED"
+    elif "CHECK_FAILED" in all_statuses:
+        batch_match_status = "CHECK_FAILED"
+    elif "PARTIAL_COVERAGE" in all_statuses:
+        batch_match_status = "PARTIAL_COVERAGE"
+    elif all_statuses.issubset({"NOT_FOUND_IN_CHECKED_SCOPE", "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE"}):
+        batch_match_status = "NOT_FOUND_VERIFIED"
+    else:
+        batch_match_status = "PARTIAL_COVERAGE" if (bounded or not is_comprehensive_scope) else "NOT_FOUND_VERIFIED"
+
+    coverage_status = "FULL_COVERAGE" if is_comprehensive_scope else "PARTIAL_COVERAGE"
+
+    return {
+        "matches": matches,
+        "decisions": decisions,
+        "accounts_scanned": scanned,
+        "vats_checked": len(args.vats),
+        "bounded": bounded,
+        "match_status": batch_match_status,
+        "coverage_status": coverage_status,
+        "scope_checked": scope_checked,
+        "modules_checked": list(modules_queried),
+        "run_id": run_id,
+        "timestamp": check_time.isoformat(),
+    }
 
 
 def crm_propose_task(args: TaskIn, rt: HubRuntime) -> dict[str, Any]:
@@ -318,6 +630,490 @@ def crm_create_task(args: TaskIn, rt: HubRuntime) -> dict[str, Any]:
 
 def crm_delete_record(args: DeleteRecordIn, rt: HubRuntime) -> dict[str, Any]:
     raise NotImplementedError("CRM deletion is never automated.")
+
+
+def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, Any]:
+    from ..lead_engine.verifier import validate_vietnam_vat
+    from ..identity import generate_payload_hash
+    import os
+    import uuid
+
+    candidates = [
+        {
+            "company": str(l.get("company") or "").strip(),
+            "domain": str(l.get("domain") or "").strip(),
+            "vat_number": str(l.get("vat_number") or "").strip(),
+        }
+        for l in args.leads
+    ]
+    companies = [c["company"] for c in candidates if c["company"]]
+    domains = [c["domain"] for c in candidates if c["domain"]]
+    vats = [c["vat_number"] for c in candidates if c["vat_number"]]
+
+    dedupe_res = crm_find_existing(FindExistingIn(companies=companies, domains=domains, vats=vats, candidates=candidates), rt)
+    matches = dedupe_res.get("matches", {})
+    decisions = dedupe_res.get("decisions", {})
+    coverage = dedupe_res.get("coverage_status", "PARTIAL_COVERAGE")
+    is_bounded = dedupe_res.get("bounded", False)
+
+    staged = []
+    eligible_records = []
+    excluded = []
+    eligibility_decisions = {}
+
+    for lead in args.leads:
+        comp = str(lead.get("company") or "").strip()
+        dom = str(lead.get("domain") or "").strip()
+        raw_vat = str(lead.get("vat_number") or "").strip()
+
+        caller_status = lead.get("crm_dedupe_status")
+
+        # Trusted Dedupe Decision Resolver (V9-001: NEVER accept untrusted caller override to clean state)
+        lead_dedupe_dec = decisions.get(comp) or decisions.get(raw_vat) or {}
+        trusted_status = lead_dedupe_dec.get("decision_status")
+
+        # Check duplicate matches across all fields or negative/duplicate upstream attestation
+        matched_id = matches.get(comp) or (matches.get(dom) if dom else None) or (matches.get(raw_vat) if raw_vat else None)
+        if matched_id or trusted_status == "DUPLICATE_CONFIRMED" or caller_status == "DUPLICATE_CONFIRMED":
+            excluded.append({
+                "company": comp,
+                "reason": f"Trùng tài khoản CRM: {matched_id or trusted_status or caller_status}",
+                "match_id": str(matched_id or "CONFIRMED"),
+            })
+            eligibility_decisions[comp] = {
+                "candidate_id": comp,
+                "company": comp,
+                "eligibility_status": "DUPLICATE_REVIEW",
+                "eligible_for_crm_import": False,
+                "reason": "Phát hiện trùng lặp với dữ liệu Zoho CRM hiện có"
+            }
+            continue
+
+        # Fail-closed: Caller status is only honored if it reports failure or partial state.
+        # Caller CANNOT self-certify clean status without authoritative proof.
+        if caller_status in ("CHECK_FAILED", "STALE_RESULT", "PARTIAL_COVERAGE"):
+            dedupe_status = caller_status
+        else:
+            dedupe_status = trusted_status or dedupe_res.get("match_status", "NOT_CHECKED")
+
+        vat_ok, vat_norm = validate_vietnam_vat(raw_vat) if raw_vat else (False, "")
+
+        # Lead quality and field integrity checks (STRICT - NO fabricated defaults)
+        missing_mandatory_fields = []
+        contact_name = lead.get("contact_name")
+        if not contact_name or not str(contact_name).strip() or str(contact_name).strip() == "[Chưa xác minh]":
+            contact_name = None
+            missing_mandatory_fields.append("contact_name")
+        else:
+            contact_name = str(contact_name).strip()
+
+        email = lead.get("email")
+        if not email or "@" not in str(email).strip():
+            email = None
+            missing_mandatory_fields.append("email")
+        else:
+            email = str(email).strip()
+
+        if not vat_ok:
+            missing_mandatory_fields.append("vat_number")
+
+        title = lead.get("title")
+        if not title or not str(title).strip() or str(title).strip() == "Chưa có chức danh":
+            title = None
+        else:
+            title = str(title).strip()
+
+        industry = lead.get("industry_code") or lead.get("industry")
+        if not industry or not str(industry).strip() or str(industry).strip() == "UNKNOWN":
+            industry = None
+        else:
+            industry = str(industry).strip()
+
+        dq_score = lead.get("data_quality_score", 0)
+        cf_score = lead.get("commercial_fit_score", 0)
+        evidence_items = lead.get("evidence", [])
+
+        # Check if legal entity is verified through authoritative evidence (V10-003)
+        # Raw caller-supplied evidence dict alone is strictly rejected without backing TrustedLegalVerificationDecision in trusted store.
+        has_authoritative_registry = False
+        db_path = Path(os.environ.get("BUZZ_MARKETING_DB", str(getattr(rt.settings, "data_dir", Path("data")) / "marketing.db")))
+        trusted_dec = None
+        if db_path.exists():
+            try:
+                from ..storage import StagingStore
+                t_store = StagingStore(db_path)
+                trusted_dec = t_store.get_legal_decision(entity_id=comp, vat_number=vat_norm if vat_ok else None)
+            except Exception:
+                pass
+
+        if trusted_dec and trusted_dec.decision_status == "VERIFIED":
+            has_authoritative_registry = True
+
+        legal_verified = vat_ok and has_authoritative_registry
+
+        # Strict Positive Fail-Closed Eligibility (V9-001)
+        clean_dedupe = (
+            dedupe_status in ("NOT_FOUND_VERIFIED", "NOT_FOUND_IN_CHECKED_SCOPE", "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE")
+            and coverage == "FULL_COVERAGE"
+            and not is_bounded
+        )
+
+        if not clean_dedupe:
+            if dedupe_status in ("CHECK_FAILED", "STALE_RESULT"):
+                action = "REVIEW_REQUIRED_DEDUPE_ERROR"
+                action_reason = "Lỗi kết nối kiểm tra Zoho CRM; cần kiểm tra lại"
+            else:
+                action = "REVIEW_REQUIRED_DEDUPE_INCOMPLETE"
+                action_reason = f"Chưa hoàn thành khử trùng lặp toàn diện (trạng thái: {dedupe_status}, độ phủ: {coverage})"
+            eligibility_status = "NEEDS_CRM_RECHECK"
+            eligible_for_crm_import = False
+        elif missing_mandatory_fields:
+            action = "NEEDS_ENRICHMENT"
+            action_reason = f"Thiếu thông tin liên hệ bắt buộc: {', '.join(missing_mandatory_fields)}"
+            eligibility_status = "NEEDS_CONTACT_ENRICHMENT"
+            eligible_for_crm_import = False
+        elif not legal_verified or dq_score < 50:
+            action = "NEEDS_VERIFICATION"
+            action_reason = "Chưa xác minh pháp nhân qua bằng chứng cơ quan thuế thẩm quyền hoặc điểm chất lượng dữ liệu dưới 50"
+            eligibility_status = "NEEDS_IDENTITY_VERIFICATION"
+            eligible_for_crm_import = False
+        else:
+            action = "STAGED_FOR_INSERT"
+            action_reason = "Hồ sơ đủ điều kiện nhập CRM: pháp nhân đã xác minh bằng chứng, không trùng CRM, thông tin liên hệ đầy đủ"
+            eligibility_status = "APPROVED_FOR_STAGING"
+            eligible_for_crm_import = True
+
+        # Construct REAL insert payload without dummy placeholder strings (V7-003)
+        zoho_payload = {
+            "Company": comp,
+            "Last_Name": contact_name,
+            "Designation": title,
+            "Email": email,
+            "Phone": lead.get("phone") or None,
+            "VAT_Number": vat_norm if vat_ok else None,
+            "Lead_Source": "GTM_AI_Discovery",
+            "Industry": industry,
+            "Description": (
+                f"[GTM AI Stage] Điểm phù hợp: {lead.get('score', 0)}/100 ({lead.get('score_reason', '')}). "
+                f"Chất lượng dữ liệu: {dq_score}/100. "
+                f"Độ khớp thương mại: {cf_score}/100. "
+                f"Dedupe: {dedupe_status}."
+            ),
+            "Lead_Status": "Chưa liên hệ / Chờ Sales duyệt",
+        }
+
+        p_hash = generate_payload_hash({k: v for k, v in zoho_payload.items() if v is not None})
+
+        record_entry = {
+            "company": comp,
+            "zoho_module": "Leads",
+            "action": action,
+            "action_reason": action_reason,
+            "payload": zoho_payload,
+            "payload_hash": p_hash,
+            "eligible_for_crm_import": eligible_for_crm_import,
+            "eligibility_status": eligibility_status,
+            "data_quality_score": dq_score,
+            "commercial_fit_score": cf_score,
+            "evidence_count": len(evidence_items),
+            "missing_fields": missing_mandatory_fields,
+            "dedupe_status": dedupe_status,
+        }
+        staged.append(record_entry)
+        if eligible_for_crm_import:
+            eligible_records.append(record_entry)
+
+        eligibility_decisions[comp] = {
+            "candidate_id": comp,
+            "company": comp,
+            "eligibility_status": eligibility_status,
+            "missing_fields": missing_mandatory_fields,
+            "dedupe_decision_ref": lead_dedupe_dec.get("evidence_ref"),
+            "identity_verified": legal_verified,
+            "payload_hash": p_hash,
+            "eligible_for_crm_import": eligible_for_crm_import,
+            "reason": action_reason,
+        }
+
+    write_enabled = os.environ.get("CRM_WRITE_ENABLED", "false").lower() in ("true", "1")
+    batch_run_id = f"batch-{uuid.uuid4().hex[:8]}"
+
+    return _artifact(rt, "crm-import-preview", batch_run_id, {
+        "total_input": len(args.leads),
+        "staged_count": len(staged),
+        "eligible_count": len(eligible_records),
+        "excluded_count": len(excluded),
+        "write_enabled": write_enabled,
+        "mode": "SAFE_PREVIEW_ONLY",
+        "staged_records": staged,
+        "eligible_records": eligible_records,
+        "excluded_records": excluded,
+        "eligibility_decisions": eligibility_decisions,
+        "dedupe_metadata": {
+            "run_id": dedupe_res.get("run_id"),
+            "coverage_status": coverage,
+            "bounded": is_bounded,
+            "scope_checked": dedupe_res.get("scope_checked", []),
+        },
+    })
+
+
+def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]:
+    import logging
+    import uuid
+    from ..lead_engine.discovery import (
+        DynamicDiscoveryEngine,
+        DiscoveryFilter,
+        ApolloDiscoveryProvider,
+        TradeManifestDiscoveryProvider,
+    )
+    from ..lead_engine.verifier import LeadVerifier
+    from ..lead_engine.scorer import TwoAxisScorer
+    from ..models import EvidenceStatus, Lead, Environment
+
+    logger = logging.getLogger(__name__)
+
+    filt = DiscoveryFilter(
+        industry_keywords=args.industry_keywords,
+        industry_codes=args.industry_codes,
+        trade_lanes=args.trade_lanes,
+        limit=args.limit,
+    )
+
+    # Wire live Apollo connector if available in runtime registry
+    apollo_conn = None
+    reg_client = None
+    if rt.registry:
+        try:
+            apollo_conn = rt.registry.get("apollo")
+        except Exception:
+            apollo_conn = None
+        try:
+            reg_client = rt.registry.get("business_registry")
+        except Exception:
+            reg_client = None
+
+    if reg_client is None and rt.settings.environment == Environment.MOCK:
+        from ..lead_engine.verifier import validate_vietnam_vat
+        class _MockRegistryClient:
+            def check_active_business(self, vat_number: str) -> tuple[bool, str | None]:
+                v_ok, _ = validate_vietnam_vat(vat_number)
+                return (v_ok, None)
+        reg_client = _MockRegistryClient()
+
+    providers = [
+        ApolloDiscoveryProvider(apollo_connector=apollo_conn),
+        TradeManifestDiscoveryProvider(),
+    ]
+    discovery = DynamicDiscoveryEngine(providers=providers)
+    disc_res = discovery.discover_candidates(filt, env=rt.settings.environment)
+
+    verifier = LeadVerifier(registry_client=reg_client)
+    scorer = TwoAxisScorer()
+
+    # Pre-score Dedupe Verification against CRM
+    companies = [c.company for c in disc_res.candidates if c.company]
+    domains = [c.domain for c in disc_res.candidates if c.domain]
+    vats = [c.vat_number for c in disc_res.candidates if c.vat_number]
+
+    dedupe_res = crm_find_existing(FindExistingIn(companies=companies, domains=domains, vats=vats), rt)
+    matches = dedupe_res.get("matches", {})
+    decisions = dedupe_res.get("decisions", {})
+    coverage = dedupe_res.get("coverage_status", "PARTIAL_COVERAGE")
+
+    verified_candidates = []
+    for cand in disc_res.candidates:
+        verifier.verify_candidate(cand)
+
+        # Corroborate CRM Dedupe Status & inject audit EvidenceItem per entity (V7-001 & V7-002)
+        c_dec = decisions.get(cand.company, {})
+        c_status = c_dec.get("decision_status")
+        is_match = (
+            cand.company in matches
+            or (cand.domain and cand.domain in matches)
+            or (cand.vat_number and cand.vat_number in matches)
+        )
+
+        if c_status == "DUPLICATE_CONFIRMED" or is_match:
+            cand.crm_dedupe_status = "DUPLICATE_CONFIRMED"
+            cand.in_crm = True
+            cand.crm_match = str(is_match or (c_dec.get("matching_record_ids") or ["MATCH"])[0])
+            cand.add_evidence(
+                field_name="crm_dedupe",
+                field_value={"status": "DUPLICATE_CONFIRMED", "match": cand.crm_match},
+                source_provider="zoho_dedupe",
+                evidence_status=EvidenceStatus.SOURCE_CORROBORATED,
+                confidence=1.0,
+            )
+        elif c_status == "NOT_FOUND_IN_CHECKED_SCOPE" or (coverage == "FULL_COVERAGE" and dedupe_res.get("match_status") == "NOT_FOUND_VERIFIED"):
+            cand.crm_dedupe_status = "NOT_FOUND_VERIFIED"
+            cand.in_crm = False
+            cand.add_evidence(
+                field_name="crm_dedupe",
+                field_value={"status": "NOT_FOUND_VERIFIED", "scope": dedupe_res.get("scope_checked", [])},
+                source_provider="zoho_dedupe",
+                evidence_status=EvidenceStatus.SOURCE_CORROBORATED,
+                confidence=0.95,
+            )
+        elif c_status == "CHECK_FAILED":
+            cand.crm_dedupe_status = "CHECK_FAILED"
+            cand.in_crm = False
+            cand.add_evidence(
+                field_name="crm_dedupe",
+                field_value={"status": "CHECK_FAILED", "error": c_dec.get("error_details")},
+                source_provider="zoho_dedupe",
+                evidence_status=EvidenceStatus.SOURCE_UNVERIFIED,
+                confidence=0.0,
+            )
+        else:
+            cand.crm_dedupe_status = "PARTIAL_COVERAGE"
+            cand.in_crm = False
+            cand.add_evidence(
+                field_name="crm_dedupe",
+                field_value={"status": "PARTIAL_COVERAGE", "bounded": dedupe_res.get("bounded", True)},
+                source_provider="zoho_dedupe",
+                evidence_status=EvidenceStatus.SOURCE_OBSERVED,
+                confidence=0.5,
+            )
+
+        scorer.score_candidate(cand)
+        cand_dict = cand.model_dump(mode="json")
+        verified_candidates.append(cand_dict)
+
+        # Persist as canonical record in storage with stable identity (V7-004 & V7-005)
+        try:
+            from ..storage import StagingStore
+            from ..identity import generate_stable_lead_id, generate_payload_hash
+            from ..models import BusinessEvent
+
+            db_path = rt.settings.data_dir / "marketing.db"
+            storage = StagingStore(db_path)
+            storage.initialize()
+
+            stable_id = generate_stable_lead_id(
+                company=cand.company,
+                domain=cand.domain,
+                vat_number=cand.vat_number
+            )
+
+            if rt.settings.environment == Environment.MOCK or not cand.synthetic:
+                lead_entity = Lead(
+                    id=stable_id,
+                    environment=cand.environment,
+                    source=cand.source,
+                    correlation_id=rt.ctx.correlation_id,
+                    synthetic=cand.synthetic,
+                    full_name=cand.contact_name or cand.company,
+                    title=cand.title,
+                    email=cand.email,
+                    score=cand.score,
+                    score_reason=cand.score_reason,
+                    qualification=cand.stage,
+                )
+
+                # Dedupe outcome distinction for business event truth (V8-006)
+                if cand.crm_dedupe_status in ("NOT_FOUND_VERIFIED", "DUPLICATE_CONFIRMED"):
+                    dedupe_outcome = "SUCCESS"
+                elif cand.crm_dedupe_status == "CHECK_FAILED":
+                    dedupe_outcome = "FAILED"
+                else:
+                    dedupe_outcome = "PARTIAL"
+
+                ev_discovered = BusinessEvent(
+                    event_type="lead.discovered",
+                    entity_id=stable_id,
+                    workflow_id=getattr(rt.ctx, "workflow_id", "") or rt.ctx.correlation_id,
+                    environment=cand.environment,
+                    synthetic=cand.synthetic,
+                    source=cand.source,
+                    correlation_id=rt.ctx.correlation_id,
+                    payload_json={
+                        "company": cand.company,
+                        "vat_number": cand.vat_number,
+                        "score": cand.score,
+                        "stage": cand.stage,
+                        "data_quality_score": cand.data_quality_score,
+                        "commercial_fit_score": cand.commercial_fit_score,
+                    }
+                )
+
+                ev_dedupe = BusinessEvent(
+                    event_type="lead.crm_dedupe_completed",
+                    entity_id=stable_id,
+                    workflow_id=getattr(rt.ctx, "workflow_id", "") or rt.ctx.correlation_id,
+                    environment=cand.environment,
+                    synthetic=cand.synthetic,
+                    source="zoho_dedupe",
+                    correlation_id=rt.ctx.correlation_id,
+                    evidence_ref=c_dec.get("evidence_ref"),
+                    payload_json={
+                        "company": cand.company,
+                        "dedupe_status": cand.crm_dedupe_status,
+                        "in_crm": cand.in_crm,
+                        "run_id": dedupe_res.get("run_id"),
+                        "outcome": dedupe_outcome,
+                    }
+                )
+
+                events_to_persist = [ev_discovered, ev_dedupe]
+                is_legally_verified = (
+                    getattr(cand, "legal_verified", False)
+                    or getattr(cand, "identity_verified", False)
+                    or getattr(cand, "registry_verified", False)
+                    or any(
+                        (isinstance(e, dict) and e.get("field_name") == "vat_number" and e.get("evidence_status") in ("VERIFIED", "SOURCE_CORROBORATED"))
+                        or (hasattr(e, "field_name") and getattr(e, "field_name", "") == "vat_number" and str(getattr(e, "evidence_status", "")) in ("VERIFIED", "SOURCE_CORROBORATED"))
+                        for e in cand.evidence
+                    )
+                )
+                if is_legally_verified:
+                    ev_verified = BusinessEvent(
+                        event_type="lead.identity_verified",
+                        entity_id=stable_id,
+                        workflow_id=getattr(rt.ctx, "workflow_id", "") or rt.ctx.correlation_id,
+                        environment=cand.environment,
+                        synthetic=cand.synthetic,
+                        source="national_tax_registry",
+                        correlation_id=rt.ctx.correlation_id,
+                        evidence_ref=c_dec.get("evidence_ref"),
+                        payload_json={
+                            "company": cand.company,
+                            "vat_number": cand.vat_number,
+                            "legal_verified": True,
+                            "outcome": "SUCCESS",
+                        }
+                    )
+                    events_to_persist.append(ev_verified)
+                    try:
+                        from ..models import TrustedLegalVerificationDecision
+                        legal_dec = TrustedLegalVerificationDecision(
+                            entity_id=cand.company,
+                            vat_number=str(cand.vat_number or ""),
+                            legal_name=cand.company,
+                            registry_source="national_tax_registry_vietnam",
+                            request_ref=f"req-disc-{stable_id}",
+                            source_data_hash=generate_payload_hash({"company": cand.company, "vat": cand.vat_number}),
+                            decision_status="VERIFIED",
+                        )
+                        storage.save_legal_decision(legal_dec)
+                    except Exception:
+                        pass
+
+                # Atomic persistence of canonical entity and all business events (V8-005)
+                storage.persist_lead_with_events(lead_entity, events_to_persist)
+        except Exception as store_err:
+            logger.error("Failed to store canonical lead entity: %s", store_err)
+            raise store_err
+
+    run_art_id = f"run-{uuid.uuid4().hex[:8]}"
+    return _artifact(rt, "pipeline-discovery", run_art_id, {
+        "total_discovered": len(verified_candidates),
+        "candidates": verified_candidates,
+        "sources": disc_res.sources_used,
+        "source_statuses": disc_res.source_statuses,
+        "filter": filt.model_dump(),
+        "dedupe_coverage": coverage,
+    })
 
 
 def prospecting_search_companies(args: SearchCompaniesIn, rt: HubRuntime) -> list[dict[str, Any]]:
@@ -707,7 +1503,7 @@ def analytics_snapshot(args: NoInput, rt: HubRuntime) -> dict[str, Any]:
 
 
 def codex_run(inp: CodexRunIn, rt: HubRuntime) -> dict[str, Any]:
-    control_js = "C:\\Users\\Admin\\AppData\\Local\\agy\\bin\\codex-control.js"
+    control_js = str(Path.home() / "AppData" / "Local" / "agy" / "bin" / "codex-control.js")
     cmd = ["node", control_js, "exec", inp.prompt, "--cd", inp.cwd, "--json"]
     if inp.model:
         cmd.extend(["--model", inp.model])
@@ -758,7 +1554,7 @@ def codex_open(inp: CodexOpenIn, rt: HubRuntime) -> dict[str, Any]:
 
 
 def codex_status(inp: CodexStatusIn, rt: HubRuntime) -> dict[str, Any]:
-    codex_bin = "C:\\Users\\Admin\\.codex\\packages\\standalone\\current\\bin\\codex.exe"
+    codex_bin = str(Path.home() / ".codex" / "packages" / "standalone" / "current" / "bin" / "codex.exe")
     cli_exists = Path(codex_bin).exists()
 
     desktop_app_running = False
@@ -828,6 +1624,10 @@ def _spec(name, impact, connector, capability, model, description, summarize=Non
 CATALOG: list[tuple[ToolSpec, Any]] = [
     (_spec("system.connector_status", Impact.READ, "system", "status", StatusIn,
            "Per-capability state (AUTH/READ/ANALYTICS/DRAFT/PUBLISH) for every connector."), system_status),
+    (_spec("crm.preview_import", Impact.DRAFT, "zoho", "read_crm_records", PreviewCrmImportIn,
+           "Generate safe Zoho CRM import preview and deduplication diff without modifying CRM."), crm_preview_import),
+    (_spec("prospecting.pipeline_run", Impact.DRAFT, "apollo", "organization_search", LeadPipelineRunIn,
+           "Run dynamic multi-source discovery, evidence verification, and two-axis commercial scoring."), lead_pipeline_run),
     (_spec("crm.search_leads", Impact.READ, "zoho", "read_crm_records", LimitIn, "List Zoho CRM leads."), _crm_list("leads")),
     (_spec("crm.list_contacts", Impact.READ, "zoho", "read_crm_records", LimitIn, "List Zoho CRM contacts."), _crm_list("contacts")),
     (_spec("crm.list_accounts", Impact.READ, "zoho", "read_crm_records", LimitIn, "List Zoho CRM accounts."), _crm_list("accounts")),

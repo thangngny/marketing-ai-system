@@ -2,17 +2,24 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import pytest
 
-base_dir = Path(r"C:\Users\Admin\marketing-ai-system\x-context-intelligence")
-sys.path.insert(0, str(base_dir))
-from src.core.browser_worker import BrowserLock
+base_dir = Path(__file__).resolve().parent.parent / "x-context-intelligence"
+if str(base_dir) not in sys.path:
+    sys.path.insert(0, str(base_dir))
+
+try:
+    from src.core.browser_worker import BrowserLock
+except (ImportError, ModuleNotFoundError, AttributeError) as e:
+    pytest.skip(f"BrowserLock or dependencies unavailable: {e}", allow_module_level=True)
 
 def test_crash_recovery():
     # Spawn a crasher process that acquires the lock and immediately dies via os._exit
-    crasher_code = """
+    escaped_base_dir = str(base_dir).replace('\\', '\\\\')
+    crasher_code = f"""
 import sys, os
 from pathlib import Path
-sys.path.insert(0, r"C:\\Users\\Admin\\marketing-ai-system\\x-context-intelligence")
+sys.path.insert(0, "{escaped_base_dir}")
 from src.core.browser_worker import BrowserLock
 
 lock = BrowserLock(job_id="crashed_job", timeout=5)

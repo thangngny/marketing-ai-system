@@ -135,6 +135,38 @@ CanonicalEntity = (
 )
 
 
+class EvidenceStatus(str):
+    VERIFIED = "VERIFIED"
+    INFERRED = "INFERRED"
+    LEGACY_IMPORT = "LEGACY_IMPORT"
+    REJECTED = "REJECTED"
+
+
+class EvidenceStatus(str):
+    FORMAT_VALID = "FORMAT_VALID"
+    SOURCE_OBSERVED = "SOURCE_OBSERVED"
+    SOURCE_CORROBORATED = "SOURCE_CORROBORATED"
+    VERIFIED = "VERIFIED"
+    INFERRED = "INFERRED"
+    UNKNOWN = "UNKNOWN"
+    CONFLICTED = "CONFLICTED"
+    REJECTED = "REJECTED"
+    LEGACY_IMPORT = "LEGACY_IMPORT"
+
+
+class EvidenceItem(BaseModel):
+    field_name: str
+    field_value: Any
+    source_url: str | None = None
+    source_provider: str
+    observed_at: datetime = Field(default_factory=utc_now)
+    verified_at: datetime | None = None
+    verification_method: str = "direct_api"
+    evidence_status: str = "INFERRED"
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    raw_evidence: str | None = None
+
+
 class LeadCandidate(BaseModel):
     """Prospect after dedupe/scoring; crosses the Account Intelligence → Sales Copilot boundary."""
 
@@ -143,15 +175,120 @@ class LeadCandidate(BaseModel):
     contact_name: str | None = None
     title: str | None = None
     email: str | None = None
+    phone: str | None = None
+    vat_number: str | None = None
+    legal_name: str | None = None
+    registered_address: str | None = None
+    industry_code: str | None = None
     source: str
     environment: Environment
     synthetic: bool = False
     in_crm: bool = False
+    crm_dedupe_status: Literal[
+        "NOT_CHECKED",
+        "CHECK_FAILED",
+        "PARTIAL_COVERAGE",
+        "POSSIBLE_DUPLICATE",
+        "DUPLICATE_CONFIRMED",
+        "NOT_FOUND_VERIFIED",
+    ] = "NOT_CHECKED"
     crm_match: str | None = None
     score: int = Field(default=0, ge=0, le=100)
+    data_quality_score: int = Field(default=0, ge=0, le=100)
+    commercial_fit_score: int = Field(default=0, ge=0, le=100)
     score_breakdown: dict[str, int] = Field(default_factory=dict)
     score_reason: str = ""
     source_reference: str | None = None
+    stage: Literal[
+        "NEW",
+        "DISCOVERING",
+        "VERIFYING",
+        "DEDUPING",
+        "SCORING",
+        "READY_FOR_REVIEW",
+        "APPROVED_FOR_CRM",
+        "REJECTED",
+    ] = "NEW"
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+
+    def add_evidence(
+        self,
+        field_name: str,
+        field_value: Any,
+        source_provider: str,
+        evidence_status: str = "INFERRED",
+        source_url: str | None = None,
+        verification_method: str = "direct_api",
+        confidence: float = 1.0,
+        raw_evidence: str | None = None,
+    ) -> EvidenceItem:
+        item = EvidenceItem(
+            field_name=field_name,
+            field_value=field_value,
+            source_url=source_url,
+            source_provider=source_provider,
+            observed_at=utc_now(),
+            verified_at=utc_now() if evidence_status in ("VERIFIED", "SOURCE_CORROBORATED") else None,
+            verification_method=verification_method,
+            evidence_status=evidence_status,
+            confidence=confidence,
+            raw_evidence=raw_evidence,
+        )
+        self.evidence.append(item)
+        return item
+
+    def get_verified_fields(self) -> dict[str, Any]:
+        """Authoritative confirmed fields only."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.VERIFIED
+        }
+
+    def get_corroborated_fields(self) -> dict[str, Any]:
+        """Fields corroborated across multiple sources."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.SOURCE_CORROBORATED
+        }
+
+    def get_observed_fields(self) -> dict[str, Any]:
+        """Fields observed from discovery sources."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.SOURCE_OBSERVED
+        }
+
+    def get_format_valid_fields(self) -> dict[str, Any]:
+        """Fields that passed syntax/format checks but lack registry verification."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.FORMAT_VALID
+        }
+
+    def get_raw_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status in (EvidenceStatus.FORMAT_VALID, EvidenceStatus.SOURCE_OBSERVED, EvidenceStatus.UNKNOWN)
+        }
+
+    def get_inferred_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.INFERRED
+        }
+
+    def get_conflicted_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.CONFLICTED
+        }
 
 
 class EmailDraft(BaseModel):
@@ -228,3 +365,112 @@ class ReadonlySyncResult(BaseModel):
     resource: str
     records: list[dict[str, Any]] = Field(default_factory=list)
     detail: str = ""
+
+
+DedupeDecisionStatus = Literal[
+    "DUPLICATE_CONFIRMED",
+    "POSSIBLE_DUPLICATE",
+    "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE",
+    "NOT_FOUND_IN_CHECKED_SCOPE",
+    "PARTIAL_COVERAGE",
+    "CHECK_FAILED",
+    "NOT_CONFIGURED",
+    "NOT_CHECKED",
+    "STALE_RESULT",
+]
+
+
+class DedupeDecision(BaseModel):
+    """Per-entity Zoho deduplication decision with complete audit trail."""
+    lead_id: str | None = None
+    candidate_key: str
+    query_run_id: str
+    crm_organization: str = "Minh Van Logistics"
+    modules_checked: list[str] = Field(default_factory=lambda: ["Accounts"])
+    field_names_checked: list[str] = Field(default_factory=lambda: ["Account_Name", "Website", "VAT_Number"])
+    search_method: str = "targeted_search"
+    request_id: str | None = None
+    query_criteria: dict[str, Any] = Field(default_factory=dict)
+    query_status: Literal["SUCCESS", "PARTIAL", "FAILED", "SKIPPED"] = "SUCCESS"
+    matching_record_ids: list[str] = Field(default_factory=list)
+    match_confidence: float = 0.0
+    cache_used: bool = False
+    cache_age_seconds: float | None = None
+    checked_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime | None = None
+    decision_status: DedupeDecisionStatus = "NOT_CHECKED"
+    error_details: str | None = None
+    evidence_ref: str | None = None
+
+
+EligibilityStatus = Literal[
+    "APPROVED_FOR_STAGING",
+    "STAGED_FOR_INSERT",
+    "NEEDS_IDENTITY_VERIFICATION",
+    "NEEDS_CONTACT_ENRICHMENT",
+    "NEEDS_CRM_RECHECK",
+    "DUPLICATE_REVIEW",
+    "READY_FOR_HUMAN_REVIEW",
+    "REJECTED",
+]
+
+
+class ImportEligibilityDecision(BaseModel):
+    """Strict per-lead evaluation of CRM staging/import readiness."""
+    candidate_id: str
+    company: str
+    eligibility_status: EligibilityStatus
+    missing_fields: list[str] = Field(default_factory=list)
+    dedupe_decision_ref: str | None = None
+    identity_verified: bool = False
+    payload_hash: str = ""
+    eligible_for_crm_import: bool = False
+    reason: str = ""
+
+
+class BusinessEvent(BaseModel):
+    """Canonical business event emitted across GTM lifecycle."""
+    event_id: str = Field(default_factory=lambda: f"evt-{uuid4().hex[:12]}")
+    event_type: str
+    entity_id: str
+    workflow_id: str
+    environment: Environment = Environment.MOCK
+    synthetic: bool = False
+    source: str = "gtm_engine"
+    occurred_at: datetime = Field(default_factory=utc_now)
+    correlation_id: str = ""
+    evidence_ref: str | None = None
+    policy_version: str = "v10.0"
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class ZohoQueryReceipt(BaseModel):
+    """Cryptographic/verifiable query receipt for Zoho API searches."""
+    receipt_id: str = Field(default_factory=lambda: f"rcpt-{uuid4().hex[:12]}")
+    run_id: str
+    organization: str = "Minh Van Logistics"
+    module: str
+    api_operation: str
+    requested_page: int = 1
+    returned_count: int = 0
+    more_records: bool = False
+    explicit_completion_status: str = "COMPLETE"
+    error_status: str | None = None
+    scanned_timestamp: datetime = Field(default_factory=utc_now)
+
+
+class TrustedLegalVerificationDecision(BaseModel):
+    """Authoritative legal entity verification decision stored in trusted store."""
+    decision_id: str = Field(default_factory=lambda: f"legaldr-{uuid4().hex[:12]}")
+    entity_id: str
+    vat_number: str
+    legal_name: str
+    registry_source: str = "national_tax_registry_vietnam"
+    request_ref: str
+    source_data_hash: str
+    decision_status: Literal["VERIFIED", "REJECTED", "MISMATCH", "UNVERIFIED"] = "VERIFIED"
+    verified_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+

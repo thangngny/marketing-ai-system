@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..constants import Environment
 from ..models import LeadCandidate
+from .approvals import ApprovalRecord, payload_hash
 from .engine import StepContext, StepOutcome, WorkflowDefinition, WorkflowStep
 
 _BLOCKING = {"NEEDS_AUTH", "NEEDS_MFA", "NEEDS_API_ACCESS", "NOT_CONFIGURED", "NOT_IMPLEMENTED", "DENIED", "ERROR", "INVALID_INPUT"}
@@ -265,6 +269,230 @@ VIDEO_PRODUCTION = WorkflowDefinition(
     finalize=finalize_video,
 )
 
+# ---------------------------------------------------------------- GTM Enterprise Lead Pipeline
+def step_gtm_discover(ctx: StepContext) -> StepOutcome:
+    p = ctx.params
+    if p.get("candidates"):
+        candidates = p["candidates"]
+        return StepOutcome(status="done", output={"discovered": candidates, "total": len(candidates)})
+    limit = int(p.get("limit", 10))
+    keywords = p.get("keywords") or ["medical", "thiết bị y tế", "dược phẩm", "linh kiện điện tử"]
+    result = ctx.tool("prospecting.pipeline_run", {
+        "industry_keywords": keywords,
+        "limit": limit
+    }, specialist="03_account_intelligence")
+    blocked = _tool_outcome(result)
+    if blocked:
+        return blocked
+    candidates = (result.data or {}).get("candidates", [])
+    return StepOutcome(status="done", output={"discovered": candidates, "total": len(candidates)})
+
+
+def step_gtm_crm_preview(ctx: StepContext) -> StepOutcome:
+    candidates = ctx.outputs["discover"]["discovered"]
+    result = ctx.tool("crm.preview_import", {"leads": candidates}, specialist="06_sales_copilot")
+    blocked = _tool_outcome(result)
+    if blocked:
+        return blocked
+    return StepOutcome(status="done", output=result.data)
+
+
+def step_gtm_gate(ctx: StepContext) -> StepOutcome:
+    preview = ctx.outputs["crm_preview"]
+    # Only propose truly ELIGIBLE records for CRM staging approval! (V8-004: strictly eligible_for_crm_import is True)
+    eligible = [
+        s for s in preview.get("staged_records", [])
+        if s.get("eligible_for_crm_import") is True
+    ]
+    if not eligible:
+        return StepOutcome(
+            status="done",
+            output={
+                "gate_status": "SKIPPED_NO_ELIGIBLE_RECORDS",
+                "detail": "Không có hồ sơ nào đủ điều kiện nhập CRM để trình phê duyệt.",
+                "eligible_count": 0,
+            }
+        )
+
+    companies_summary = ", ".join(s["company"] for s in eligible[:3])
+    hashes = [s.get("payload_hash", "")[:8] for s in eligible if s.get("payload_hash")]
+    hash_str = f", Hashes: {', '.join(hashes)}" if hashes else ""
+    summary = (
+        f"Phê duyệt đưa {len(eligible)} khách hàng tiềm năng đã xác thực pháp nhân & khử trùng lặp vào Zoho CRM "
+        f"(Write-mode: {preview.get('write_enabled', False)}{hash_str}). "
+        f"Doanh nghiệp: {companies_summary}"
+    )
+    return ctx.gate("workflow.stage_leads_for_crm", eligible, summary)
+
+
+def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
+    preview = ctx.outputs.get("crm_preview", {})
+    gate_out = ctx.outputs.get("approval_gate", {})
+
+    # If gate was skipped due to no eligible records
+    if gate_out.get("gate_status") == "SKIPPED_NO_ELIGIBLE_RECORDS":
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "SKIPPED_NO_ELIGIBLE_LEADS",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING"
+        })
+
+    approval_id = gate_out.get("approval_id") or (getattr(ctx, "workflow", {}) or {}).get("approval_id")
+    eligible = [
+        s for s in preview.get("staged_records", [])
+        if s.get("eligible_for_crm_import") is True
+    ]
+    digest = payload_hash("workflow.stage_leads_for_crm", eligible)
+    approved_records = []
+
+    engine = getattr(ctx, "engine", None)
+    if engine is None:
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "APPROVAL_SERVICE_UNAVAILABLE",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "approval_id": approval_id,
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING",
+            "error_detail": "Approval engine unavailable; context injection rejected",
+        })
+
+    approvals_svc = getattr(engine, "approvals", engine)
+    if not hasattr(approvals_svc, "get"):
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "APPROVAL_SERVICE_UNAVAILABLE",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "approval_id": approval_id,
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING",
+            "error_detail": "Approval service missing",
+        })
+
+    if approval_id:
+        rec = approvals_svc.get(approval_id)
+        if rec:
+            if isinstance(rec, ApprovalRecord):
+                auth_ok = rec.authorizes("workflow.stage_leads_for_crm", digest)
+            else:
+                auth_ok = (
+                    getattr(rec, "status", None) == "APPROVED"
+                    and not (getattr(rec, "expired", lambda: False)())
+                    and getattr(rec, "payload_hash", None) == digest
+                    and not (isinstance(getattr(rec, "consumed_at", None), str) and bool(getattr(rec, "consumed_at", None)))
+                )
+
+            if auth_ok:
+                if hasattr(approvals_svc, "consume") and callable(approvals_svc.consume):
+                    consumed = approvals_svc.consume(approval_id)
+                else:
+                    consumed = True
+                if consumed:
+                    approved_records = eligible
+
+    # Record lead.crm_staged business events for approved records via atomic persist
+    staging_failure_detail = None
+    if approved_records:
+        settings = getattr(engine, "settings", None)
+        data_dir = getattr(settings, "data_dir", None)
+        if isinstance(data_dir, (str, Path)):
+            db_path = Path(os.environ.get("BUZZ_MARKETING_DB", str(Path(data_dir) / "marketing.db")))
+        else:
+            db_path = Path(os.environ.get("BUZZ_MARKETING_DB", "data/marketing.db"))
+
+        env_val = getattr(settings, "environment", None)
+        if not isinstance(env_val, Environment):
+            env_val = Environment.MOCK
+        try:
+            from ..storage import StagingStore
+            from ..models import BusinessEvent, Lead
+            store = StagingStore(db_path)
+            for rec in approved_records:
+                comp = rec.get("company", "")
+                p_hash = rec.get("payload_hash", "")
+                ev = BusinessEvent(
+                    event_type="lead.crm_staged",
+                    entity_id=comp,
+                    workflow_id=getattr(ctx, "workflow", {}).get("workflow_id", "") or "wf-staging",
+                    environment=env_val,
+                    synthetic=(env_val.value == "mock"),
+                    source="gtm_pipeline_approval",
+                    correlation_id=getattr(ctx, "workflow", {}).get("correlation_id", "") or "corr-staging",
+                    payload_json={
+                        "company": comp,
+                        "action": "STAGED_FOR_INSERT",
+                        "payload_hash": p_hash,
+                        "approval_id": approval_id,
+                        "outcome": "SUCCESS",
+                    }
+                )
+                lead_entity = Lead(
+                    id=rec.get("candidate_id") or f"lead-staged-{comp}",
+                    full_name=rec.get("contact_name") or comp,
+                    source="gtm_pipeline_approval",
+                    correlation_id=getattr(ctx, "workflow", {}).get("correlation_id", "") or "corr-staging",
+                    environment=env_val,
+                    synthetic=(env_val.value == "mock"),
+                    metadata={"company": comp, "approval_id": approval_id, "payload": rec.get("payload", {})},
+                )
+                store.persist_lead_with_events(lead_entity, [ev])
+        except Exception as exc:
+            staging_failure_detail = str(exc)
+            approved_records = []
+
+    if staging_failure_detail:
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "STAGING_FAILED_RECOVERABLE",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "approval_id": approval_id,
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING",
+            "error_detail": staging_failure_detail,
+        })
+
+    stage_status = "APPROVED_FOR_CRM" if approved_records else "NO_APPROVED_LEADS_STAGED"
+
+    return StepOutcome(status="done", output={
+        "approved_count": len(approved_records),
+        "stage_status": stage_status,
+        "staged_records": approved_records,
+        "all_preview_records": preview.get("staged_records", []),
+        "approval_id": approval_id,
+        "crm_write_executed": False,
+        "mode": "SAFE_CONTROLLED_STAGING"
+    })
+
+
+def finalize_gtm_lead_pipeline(wf: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "workflow_id": wf.get("workflow_id"),
+        "total_discovered": out.get("discover", {}).get("total", 0),
+        "crm_preview": out.get("crm_preview", {}),
+        "final_staging": out.get("finalize_stage", {}),
+        "status": "COMPLETED"
+    }
+
+
+GTM_LEAD_PIPELINE = WorkflowDefinition(
+    workflow_type="gtm_lead_pipeline",
+    description="Enterprise GTM Lead Pipeline: Discovery → Verification (VAT/MX) → Dedupe → Two-Axis Scoring → Zoho CRM Safe Preview → Human Approval Gate → Staging.",
+    steps=[
+        WorkflowStep("discover", "03_account_intelligence", step_gtm_discover),
+        WorkflowStep("crm_preview", "06_sales_copilot", step_gtm_crm_preview),
+        WorkflowStep("approval_gate", "06_sales_copilot", step_gtm_gate),
+        WorkflowStep("finalize_stage", "06_sales_copilot", step_gtm_finalize_stage),
+    ],
+    finalize=finalize_gtm_lead_pipeline,
+)
+
+
 DEFINITIONS: dict[str, WorkflowDefinition] = {
-    d.workflow_type: d for d in (PROSPECT_TO_DRAFT, TOOL_APPROVAL, VIDEO_PRODUCTION)
+    d.workflow_type: d for d in (PROSPECT_TO_DRAFT, TOOL_APPROVAL, VIDEO_PRODUCTION, GTM_LEAD_PIPELINE)
 }

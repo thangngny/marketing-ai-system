@@ -31,6 +31,30 @@ class ApolloConnector(BaseConnector):
         body = response.json()
         return list(body.get("organizations") or []) + list(body.get("accounts") or [])
 
+    def search_people(self, q_keywords: str = "", titles: list[str] | None = None, locations: list[str] | None = None, per_page: int = 10) -> list[dict]:
+        """People search (0 credits on basic search per Apollo documentation). Never calls enrichment."""
+        payload: dict[str, Any] = {
+            "page": 1,
+            "per_page": min(max(per_page, 1), 25),
+        }
+        if q_keywords:
+            payload["q_keywords"] = q_keywords
+        if titles:
+            payload["person_titles"] = titles
+        if locations:
+            payload["person_locations"] = locations
+        response = self.request(
+            "POST",
+            "https://api.apollo.io/api/v1/mixed_people/search",
+            headers={"accept": "application/json", "content-type": "application/json",
+                     "x-api-key": self.env("APOLLO_API_KEY") or ""},
+            json=payload,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        body = response.json()
+        return list(body.get("people") or [])
+
     def probe_live(self) -> tuple[bool, str]:
         response = self.request(
             "GET",

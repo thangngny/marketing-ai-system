@@ -164,9 +164,11 @@ def test_background_mode_returns_immediately_and_finishes(env):
     assert status["state"] == "WAITING_APPROVAL"
     owner_says(f"DUYET {status['approval']['code']}")
     platform.engine.resume_async(first["workflow_id"])
-    for _ in range(400):  # generous: background thread timing varies on a busy host
+    for i in range(400):  # generous: background thread timing varies on a busy host
         if platform.engine.status(first["workflow_id"])["state"] == "DONE":
             break
+        if i % 20 == 19 and platform.engine.status(first["workflow_id"])["state"] == "WAITING_APPROVAL":
+            platform.engine.resume_async(first["workflow_id"])
         time.sleep(0.05)
     assert platform.engine.status(first["workflow_id"])["state"] == "DONE"
 

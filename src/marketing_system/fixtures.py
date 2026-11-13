@@ -79,6 +79,14 @@ def mock_crm_accounts() -> list[dict[str, object]]:
     ]
 
 
+def mock_crm_leads() -> list[dict[str, object]]:
+    """Synthetic CRM leads state."""
+    return [
+        {"Company": "Công ty Vận tải Mẫu Sao Việt", "Email": "contact@saoviet-forwarding.example.invalid",
+         "id": "mock-zoho-lead-1", "label": "SYNTHETIC_MOCK_DATA"},
+    ]
+
+
 def mock_campaign_metrics() -> list[dict[str, object]]:
     return [
         {"campaign": "MOCK - Forwarding Q3", "impressions": 12000, "clicks": 312, "leads": 18, "spend_vnd": 4_200_000},

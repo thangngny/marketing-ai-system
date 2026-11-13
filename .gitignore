@@ -23,3 +23,5 @@ logs/*.jsonl
 data/*.json
 scratch_icon_b64.txt
 x-video-intelligence/data/jobs/
+data/artifacts/
+x-context-intelligence/data/

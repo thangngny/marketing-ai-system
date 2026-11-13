@@ -64,6 +64,7 @@ class ApprovalRecord(BaseModel):
             and self.requested_action == tool
             and self.payload_hash == digest
             and not self.expired(now)
+            and self.consumed_at is None
         )
 
 
