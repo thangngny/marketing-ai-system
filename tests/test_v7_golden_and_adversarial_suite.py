@@ -33,6 +33,7 @@ from marketing_system.models import (
     ImportEligibilityDecision,
     Lead,
     LeadCandidate,
+    TrustedLegalVerificationDecision,
 )
 from marketing_system.storage import StagingStore
 from marketing_system.tools.catalog import (
@@ -201,6 +202,19 @@ def test_golden_dataset_six_entities_end_to_end(tmp_path):
     hub = build_hub(settings=settings)
     ctx = ToolContext(correlation_id="golden-dataset-run")
     rt = HubRuntime(settings=settings, registry=hub.registry, ctx=ctx, artifacts_dir=settings.data_dir / "artifacts")
+
+    # Seed trusted legal verification decision for Lead 1
+    store = StagingStore(settings.data_dir / "marketing.db")
+    store.initialize()
+    store.save_legal_decision(TrustedLegalVerificationDecision(
+        entity_id="Công ty TNHH Y Tế Hoàn Hảo",
+        vat_number="0107889123",
+        legal_name="Công ty TNHH Y Tế Hoàn Hảo",
+        registry_source="national_tax_registry_vietnam",
+        request_ref="req-golden-01",
+        source_data_hash="hash-golden-01",
+        decision_status="VERIFIED",
+    ))
 
     golden_leads = [
         # Lead 1: Complete and fully eligible

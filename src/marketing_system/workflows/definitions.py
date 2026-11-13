@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..constants import Environment
 from ..models import LeadCandidate
 from .approvals import ApprovalRecord, payload_hash
 from .engine import StepContext, StepOutcome, WorkflowDefinition, WorkflowStep
@@ -346,8 +349,33 @@ def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
     approved_records = []
 
     engine = getattr(ctx, "engine", None)
-    if engine and hasattr(engine, "approvals") and approval_id:
-        rec = engine.approvals.get(approval_id)
+    if engine is None:
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "APPROVAL_SERVICE_UNAVAILABLE",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "approval_id": approval_id,
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING",
+            "error_detail": "Approval engine unavailable; context injection rejected",
+        })
+
+    approvals_svc = getattr(engine, "approvals", engine)
+    if not hasattr(approvals_svc, "get"):
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "APPROVAL_SERVICE_UNAVAILABLE",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "approval_id": approval_id,
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING",
+            "error_detail": "Approval service missing",
+        })
+
+    if approval_id:
+        rec = approvals_svc.get(approval_id)
         if rec:
             if isinstance(rec, ApprovalRecord):
                 auth_ok = rec.authorizes("workflow.stage_leads_for_crm", digest)
@@ -360,34 +388,30 @@ def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
                 )
 
             if auth_ok:
-                if hasattr(engine.approvals, "consume") and callable(engine.approvals.consume):
-                    consumed = engine.approvals.consume(approval_id)
+                if hasattr(approvals_svc, "consume") and callable(approvals_svc.consume):
+                    consumed = approvals_svc.consume(approval_id)
                 else:
                     consumed = True
                 if consumed:
                     approved_records = eligible
-    elif engine is None and approval_id:
-        # Standalone step invocation: strictly require valid approval record passed in context
-        mock_rec = getattr(ctx, "approval_record", None)
-        if mock_rec:
-            if isinstance(mock_rec, ApprovalRecord):
-                auth_ok = mock_rec.authorizes("workflow.stage_leads_for_crm", digest)
-            else:
-                auth_ok = (
-                    getattr(mock_rec, "status", None) == "APPROVED"
-                    and not (getattr(mock_rec, "expired", lambda: False)())
-                    and getattr(mock_rec, "payload_hash", None) == digest
-                    and not (isinstance(getattr(mock_rec, "consumed_at", None), str) and bool(getattr(mock_rec, "consumed_at", None)))
-                )
-            if auth_ok:
-                approved_records = eligible
 
-    # Record lead.crm_staged business events for approved records
-    if approved_records and engine and hasattr(engine, "settings"):
+    # Record lead.crm_staged business events for approved records via atomic persist
+    staging_failure_detail = None
+    if approved_records:
+        settings = getattr(engine, "settings", None)
+        data_dir = getattr(settings, "data_dir", None)
+        if isinstance(data_dir, (str, Path)):
+            db_path = Path(os.environ.get("BUZZ_MARKETING_DB", str(Path(data_dir) / "marketing.db")))
+        else:
+            db_path = Path(os.environ.get("BUZZ_MARKETING_DB", "data/marketing.db"))
+
+        env_val = getattr(settings, "environment", None)
+        if not isinstance(env_val, Environment):
+            env_val = Environment.MOCK
         try:
             from ..storage import StagingStore
-            from ..models import BusinessEvent
-            store = StagingStore(engine.settings.data_dir / "marketing.db")
+            from ..models import BusinessEvent, Lead
+            store = StagingStore(db_path)
             for rec in approved_records:
                 comp = rec.get("company", "")
                 p_hash = rec.get("payload_hash", "")
@@ -395,8 +419,8 @@ def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
                     event_type="lead.crm_staged",
                     entity_id=comp,
                     workflow_id=getattr(ctx, "workflow", {}).get("workflow_id", "") or "wf-staging",
-                    environment=engine.settings.environment,
-                    synthetic=(engine.settings.environment.value == "mock"),
+                    environment=env_val,
+                    synthetic=(env_val.value == "mock"),
                     source="gtm_pipeline_approval",
                     correlation_id=getattr(ctx, "workflow", {}).get("correlation_id", "") or "corr-staging",
                     payload_json={
@@ -407,9 +431,31 @@ def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
                         "outcome": "SUCCESS",
                     }
                 )
-                store.record_event(ev)
-        except Exception:
-            pass
+                lead_entity = Lead(
+                    id=rec.get("candidate_id") or f"lead-staged-{comp}",
+                    full_name=rec.get("contact_name") or comp,
+                    source="gtm_pipeline_approval",
+                    correlation_id=getattr(ctx, "workflow", {}).get("correlation_id", "") or "corr-staging",
+                    environment=env_val,
+                    synthetic=(env_val.value == "mock"),
+                    metadata={"company": comp, "approval_id": approval_id, "payload": rec.get("payload", {})},
+                )
+                store.persist_lead_with_events(lead_entity, [ev])
+        except Exception as exc:
+            staging_failure_detail = str(exc)
+            approved_records = []
+
+    if staging_failure_detail:
+        return StepOutcome(status="done", output={
+            "approved_count": 0,
+            "stage_status": "STAGING_FAILED_RECOVERABLE",
+            "staged_records": [],
+            "all_preview_records": preview.get("staged_records", []),
+            "approval_id": approval_id,
+            "crm_write_executed": False,
+            "mode": "SAFE_CONTROLLED_STAGING",
+            "error_detail": staging_failure_detail,
+        })
 
     stage_status = "APPROVED_FOR_CRM" if approved_records else "NO_APPROVED_LEADS_STAGED"
 

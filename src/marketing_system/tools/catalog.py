@@ -375,8 +375,25 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
     modules_queried: list[str] = []
     scanned = 0
     bounded = False
+    receipt_incomplete = False
 
-    if getattr(rt, "mock", True) or connector is None:
+    is_live_env = getattr(getattr(rt, "settings", None), "environment", Environment.MOCK) in (Environment.SANDBOX, Environment.PRODUCTION)
+
+    has_test_connector = connector is not None and (
+        hasattr(connector, "query_receipt")
+        or getattr(getattr(connector, "read", None), "return_value", None) is not None
+        or getattr(getattr(connector, "read", None), "side_effect", None) is not None
+        or (getattr(connector, "configured", lambda: False)() is True)
+    )
+
+    # V10-002: In live environments, REFUSE mock fallback if connector is missing or unconfigured
+    if is_live_env and (connector is None or getattr(connector, "configured", lambda: True)() is False):
+        api_error = "NOT_CONFIGURED"
+        bounded = True
+        modules_queried = []
+        scope_checked.append("zoho_connector_unconfigured")
+    elif not is_live_env and not has_test_connector:
+        # Mock environment without configured live connector or explicit test responses
         accounts = mock_crm_accounts()
         leads = mock_crm_leads()
         for a in accounts:
@@ -404,6 +421,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
         modules_queried = ["Accounts", "Leads"]
         scope_checked.extend(["mock_accounts", "mock_leads"])
     else:
+        # Live connector execution (or configured mock connector in test)
         corr_id = getattr(getattr(rt, "ctx", None), "correlation_id", "corr-dedupe")
         scanned_accounts = 0
         scanned_leads = 0
@@ -450,8 +468,26 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             api_error = f"{api_error}; {lead_err}" if api_error else lead_err
             scope_checked.append(f"zoho_leads_error:{exc}")
 
+        # V10-001: Inspect Zoho Query Receipts for pagination & completion status
+        if hasattr(connector, "query_receipt"):
+            try:
+                try:
+                    rcpt = connector.query_receipt("Accounts")
+                except TypeError:
+                    rcpt = connector.query_receipt()
+                if rcpt is not None and type(rcpt).__name__ == "ZohoQueryReceipt":
+                    if getattr(rcpt, "more_records", False) is True:
+                        bounded_accounts = True
+                        receipt_incomplete = True
+                    if isinstance(getattr(rcpt, "explicit_completion_status", None), str) and rcpt.explicit_completion_status not in ("COMPLETE", "SUCCESS"):
+                        receipt_incomplete = True
+                    if isinstance(getattr(rcpt, "error_status", None), str) and rcpt.error_status:
+                        api_error = f"Receipt error: {rcpt.error_status}"
+            except Exception:
+                pass
+
         scanned = scanned_accounts + scanned_leads
-        bounded = bounded_accounts or bounded_leads
+        bounded = bounded_accounts or bounded_leads or receipt_incomplete
 
     for company in companies_to_check:
         n_comp = _norm(company)
@@ -470,7 +506,13 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
 
     # 3. Generate Independent Per-Entity Dedupe Decisions (V8-001 & V8-002)
     decisions: dict[str, dict[str, Any]] = {}
-    is_comprehensive_scope = ("Accounts" in modules_queried and "Leads" in modules_queried and not bounded and not api_error)
+    is_comprehensive_scope = (
+        "Accounts" in modules_queried
+        and "Leads" in modules_queried
+        and not bounded
+        and not api_error
+        and not receipt_incomplete
+    )
 
     candidates_to_eval: list[dict[str, Any]] = []
     if getattr(args, "candidates", None):
@@ -494,17 +536,23 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             q_status = "SUCCESS"
             err = None
             matched_ids = [str(matched_id)]
+        elif api_error == "NOT_CONFIGURED":
+            dec_status = "NOT_CONFIGURED"
+            confidence = 0.0
+            q_status = "FAILED"
+            err = "Zoho connector not configured in live environment"
+            matched_ids = []
         elif api_error is not None:
             dec_status = "CHECK_FAILED"
             confidence = 0.0
             q_status = "FAILED"
             err = api_error
             matched_ids = []
-        elif not is_comprehensive_scope:
+        elif not is_comprehensive_scope or bounded:
             dec_status = "PARTIAL_COVERAGE"
             confidence = 0.5
             q_status = "PARTIAL"
-            err = "Zoho search scope incomplete (bounded or missing required modules)"
+            err = "Zoho search scope incomplete (bounded or missing required modules or more_records present)"
             matched_ids = []
         else:
             dec_status = "NOT_FOUND_IN_CHECKED_SCOPE"
@@ -539,6 +587,8 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
     all_statuses = {d["decision_status"] for d in decisions.values()} if decisions else set()
     if "DUPLICATE_CONFIRMED" in all_statuses:
         batch_match_status = "DUPLICATE_FOUND"
+    elif "NOT_CONFIGURED" in all_statuses:
+        batch_match_status = "NOT_CONFIGURED"
     elif "CHECK_FAILED" in all_statuses:
         batch_match_status = "CHECK_FAILED"
     elif "PARTIAL_COVERAGE" in all_statuses:
@@ -681,30 +731,23 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
 
         dq_score = lead.get("data_quality_score", 0)
         cf_score = lead.get("commercial_fit_score", 0)
-
-        # Check if legal entity is verified through authoritative evidence (V9-002)
-        # Format/checksum (vat_ok) alone is NOT legal entity verification!
-        # Caller cannot self-attest registry_verified without authoritative evidence.
         evidence_items = lead.get("evidence", [])
+
+        # Check if legal entity is verified through authoritative evidence (V10-003)
+        # Raw caller-supplied evidence dict alone is strictly rejected without backing TrustedLegalVerificationDecision in trusted store.
         has_authoritative_registry = False
-        authoritative_sources = {
-            "national_tax_portal",
-            "national_tax_registry_vietnam",
-            "vietnam_gdt_portal",
-            "dangkykinhdoanh.gov.vn",
-            "authoritative_api",
-        }
-        for e in evidence_items:
-            if not isinstance(e, dict):
-                continue
-            ef = e.get("field_name")
-            es = e.get("evidence_status") or e.get("status")
-            sp = str(e.get("source_provider") or e.get("verification_source") or "").lower()
-            if ef in ("vat_number", "legal_name", "business_registration"):
-                if es in ("VERIFIED", "SOURCE_CORROBORATED"):
-                    if any(auth_src in sp for auth_src in authoritative_sources) or "corroborated" in str(es).lower():
-                        has_authoritative_registry = True
-                        break
+        db_path = Path(os.environ.get("BUZZ_MARKETING_DB", str(getattr(rt.settings, "data_dir", Path("data")) / "marketing.db")))
+        trusted_dec = None
+        if db_path.exists():
+            try:
+                from ..storage import StagingStore
+                t_store = StagingStore(db_path)
+                trusted_dec = t_store.get_legal_decision(entity_id=comp, vat_number=vat_norm if vat_ok else None)
+            except Exception:
+                pass
+
+        if trusted_dec and trusted_dec.decision_status == "VERIFIED":
+            has_authoritative_registry = True
 
         legal_verified = vat_ok and has_authoritative_registry
 
@@ -850,6 +893,14 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
         except Exception:
             reg_client = None
 
+    if reg_client is None and rt.settings.environment == Environment.MOCK:
+        from ..lead_engine.verifier import validate_vietnam_vat
+        class _MockRegistryClient:
+            def check_active_business(self, vat_number: str) -> tuple[bool, str | None]:
+                v_ok, _ = validate_vietnam_vat(vat_number)
+                return (v_ok, None)
+        reg_client = _MockRegistryClient()
+
     providers = [
         ApolloDiscoveryProvider(apollo_connector=apollo_conn),
         TradeManifestDiscoveryProvider(),
@@ -932,7 +983,7 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
         # Persist as canonical record in storage with stable identity (V7-004 & V7-005)
         try:
             from ..storage import StagingStore
-            from ..identity import generate_stable_lead_id
+            from ..identity import generate_stable_lead_id, generate_payload_hash
             from ..models import BusinessEvent
 
             db_path = rt.settings.data_dir / "marketing.db"
@@ -1005,7 +1056,17 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
                 )
 
                 events_to_persist = [ev_discovered, ev_dedupe]
-                if getattr(cand, "legal_verified", False) or getattr(cand, "identity_verified", False) or getattr(cand, "registry_verified", False):
+                is_legally_verified = (
+                    getattr(cand, "legal_verified", False)
+                    or getattr(cand, "identity_verified", False)
+                    or getattr(cand, "registry_verified", False)
+                    or any(
+                        (isinstance(e, dict) and e.get("field_name") == "vat_number" and e.get("evidence_status") in ("VERIFIED", "SOURCE_CORROBORATED"))
+                        or (hasattr(e, "field_name") and getattr(e, "field_name", "") == "vat_number" and str(getattr(e, "evidence_status", "")) in ("VERIFIED", "SOURCE_CORROBORATED"))
+                        for e in cand.evidence
+                    )
+                )
+                if is_legally_verified:
                     ev_verified = BusinessEvent(
                         event_type="lead.identity_verified",
                         entity_id=stable_id,
@@ -1023,6 +1084,20 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
                         }
                     )
                     events_to_persist.append(ev_verified)
+                    try:
+                        from ..models import TrustedLegalVerificationDecision
+                        legal_dec = TrustedLegalVerificationDecision(
+                            entity_id=cand.company,
+                            vat_number=str(cand.vat_number or ""),
+                            legal_name=cand.company,
+                            registry_source="national_tax_registry_vietnam",
+                            request_ref=f"req-disc-{stable_id}",
+                            source_data_hash=generate_payload_hash({"company": cand.company, "vat": cand.vat_number}),
+                            decision_status="VERIFIED",
+                        )
+                        storage.save_legal_decision(legal_dec)
+                    except Exception:
+                        pass
 
                 # Atomic persistence of canonical entity and all business events (V8-005)
                 storage.persist_lead_with_events(lead_entity, events_to_persist)

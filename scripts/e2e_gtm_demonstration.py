@@ -43,6 +43,9 @@ from marketing_system.workflows.engine import WorkflowEngine
 from marketing_system.tools.catalog import build_hub
 from marketing_system.runtime.mock import MockRuntime
 from marketing_system.config import Settings
+from marketing_system.storage import StagingStore
+from marketing_system.models import TrustedLegalVerificationDecision
+
 
 
 def run_e2e_demonstration():
@@ -120,10 +123,21 @@ def run_e2e_demonstration():
 
     # STEP 5 & 6: Workflow Safe CRM Preview & Human-in-the-loop Approval
     print("\n[BƯỚC 5 & 6] Kích hoạt Workflow GTM Lead Pipeline & Chốt phê duyệt an toàn...")
-    demo_tmp = Path(r"C:\Users\Admin\.buzz\.scratch\e2e_run")
+    demo_tmp = Path(r"C:\Users\Admin\.buzz\.scratch") / f"e2e_run_{int(time.time())}"
     demo_tmp.mkdir(parents=True, exist_ok=True)
     settings = Settings(environment=Environment.MOCK, data_dir=demo_tmp, log_dir=demo_tmp)
     settings.ensure_runtime_dirs()
+    staging = StagingStore(settings.data_dir / "marketing.db")
+    for idx, c in enumerate(qualified_leads):
+        staging.save_legal_decision(TrustedLegalVerificationDecision(
+            entity_id=c.company,
+            vat_number=str(c.vat_number or ""),
+            legal_name=c.company,
+            registry_source="national_tax_registry_vietnam",
+            request_ref=f"req-demo-{idx}",
+            source_data_hash=f"hash-{c.vat_number}-{idx}",
+            decision_status="VERIFIED",
+        ))
     store = WorkflowStore(settings.data_dir / "marketing.db")
     approvals = ApprovalEngine(store)
     policy = PolicyEngine()
@@ -188,38 +202,39 @@ def run_e2e_demonstration():
     print(f"  ✓ Task đề xuất cho Sales: \"{dossier.task_proposal.subject}\" (Hạn: {dossier.task_proposal.due_in_days} ngày)")
     demo_artifacts["step9_dossier"] = dossier.model_dump(mode="json")
 
+    # Wrap demo artifacts with V10 metadata
+    run_id = f"run_v10_{int(time.time())}"
+    final_report = {
+        "run_id": run_id,
+        "run_type": "MOCK_E2E",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "version": "RC-V10",
+        "description": "Enterprise GTM AI End-to-End Simulation Report (Mock Environment)",
+        "safe_invariants": {
+            "SAFE_DRY_RUN": True,
+            "CRM_WRITE_ENABLED": False,
+            "OUTREACH_ENABLED": False
+        },
+        "artifacts": demo_artifacts
+    }
+
     # Save output to delivery folders
+    delivery_dir_v10 = Path(os.environ.get("BUZZ_DELIVERY_DIR", r"C:\Users\Admin\BUZZ_GTM_V10_DELIVERY"))
+    delivery_dir_v10.mkdir(parents=True, exist_ok=True)
+    (delivery_dir_v10 / "e2e_simulation_report.json").write_text(json.dumps(final_report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    evidence_run_dir = delivery_dir_v10 / "evidence" / "runs" / run_id
+    evidence_run_dir.mkdir(parents=True, exist_ok=True)
+    evidence_out = evidence_run_dir / "e2e_simulation_report.json"
+    evidence_out.write_text(json.dumps(final_report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Also keep compatibility with V9 delivery folder
     delivery_dir_v9 = Path(r"C:\Users\Admin\BUZZ_GTM_V9_DELIVERY")
-    delivery_dir_v9.mkdir(parents=True, exist_ok=True)
-    delivery_out_v9 = delivery_dir_v9 / "e2e_simulation_report.json"
-    delivery_out_v9.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    delivery_dir_v8 = Path(r"C:\Users\Admin\BUZZ_GTM_V8_DELIVERY")
-    delivery_dir_v8.mkdir(parents=True, exist_ok=True)
-    delivery_out_v8 = delivery_dir_v8 / "e2e_simulation_report.json"
-    delivery_out_v8.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    delivery_dir_v7 = Path(r"C:\Users\Admin\BUZZ_GTM_V7_DELIVERY")
-    delivery_dir_v7.mkdir(parents=True, exist_ok=True)
-    delivery_out_v7 = delivery_dir_v7 / "e2e_simulation_report.json"
-    delivery_out_v7.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    delivery_dir_v6 = Path(r"C:\Users\Admin\BUZZ_GTM_V6_DELIVERY")
-    delivery_dir_v6.mkdir(parents=True, exist_ok=True)
-    delivery_out_v6 = delivery_dir_v6 / "e2e_simulation_report.json"
-    delivery_out_v6.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    delivery_dir_v5 = Path(r"C:\Users\Admin\BUZZ_GTM_V5_DELIVERY")
-    delivery_dir_v5.mkdir(parents=True, exist_ok=True)
-    delivery_out_v5 = delivery_dir_v5 / "e2e_simulation_report.json"
-    delivery_out_v5.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    delivery_dir_v4 = Path(r"C:\Users\Admin\BUZZ_GTM_V4_DELIVERY")
-    delivery_dir_v4.mkdir(parents=True, exist_ok=True)
-    (delivery_dir_v4 / "e2e_simulation_report.json").write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
+    if delivery_dir_v9.exists():
+        (delivery_dir_v9 / "e2e_simulation_report.json").write_text(json.dumps(final_report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\n================================================================================")
-    print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {delivery_out_v9}")
+    print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {evidence_out}")
     print(f"================================================================================\n")
 
 

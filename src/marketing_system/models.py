@@ -374,6 +374,7 @@ DedupeDecisionStatus = Literal[
     "NOT_FOUND_IN_CHECKED_SCOPE",
     "PARTIAL_COVERAGE",
     "CHECK_FAILED",
+    "NOT_CONFIGURED",
     "NOT_CHECKED",
     "STALE_RESULT",
 ]
@@ -439,6 +440,37 @@ class BusinessEvent(BaseModel):
     occurred_at: datetime = Field(default_factory=utc_now)
     correlation_id: str = ""
     evidence_ref: str | None = None
-    policy_version: str = "v7.0"
+    policy_version: str = "v10.0"
     payload_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class ZohoQueryReceipt(BaseModel):
+    """Cryptographic/verifiable query receipt for Zoho API searches."""
+    receipt_id: str = Field(default_factory=lambda: f"rcpt-{uuid4().hex[:12]}")
+    run_id: str
+    organization: str = "Minh Van Logistics"
+    module: str
+    api_operation: str
+    requested_page: int = 1
+    returned_count: int = 0
+    more_records: bool = False
+    explicit_completion_status: str = "COMPLETE"
+    error_status: str | None = None
+    scanned_timestamp: datetime = Field(default_factory=utc_now)
+
+
+class TrustedLegalVerificationDecision(BaseModel):
+    """Authoritative legal entity verification decision stored in trusted store."""
+    decision_id: str = Field(default_factory=lambda: f"legaldr-{uuid4().hex[:12]}")
+    entity_id: str
+    vat_number: str
+    legal_name: str
+    registry_source: str = "national_tax_registry_vietnam"
+    request_ref: str
+    source_data_hash: str
+    decision_status: Literal["VERIFIED", "REJECTED", "MISMATCH", "UNVERIFIED"] = "VERIFIED"
+    verified_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
 

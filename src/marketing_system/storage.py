@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .constants import Environment
-from .models import BaseEntity, BusinessEvent
+from .models import BaseEntity, BusinessEvent, TrustedLegalVerificationDecision
 
 
 class EventConflictError(ValueError):
@@ -77,6 +77,29 @@ class StagingStore:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_type ON business_events(event_type)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trusted_legal_decisions (
+                    decision_id TEXT PRIMARY KEY,
+                    entity_id TEXT NOT NULL,
+                    vat_number TEXT NOT NULL,
+                    legal_name TEXT NOT NULL,
+                    registry_source TEXT NOT NULL,
+                    request_ref TEXT NOT NULL,
+                    source_data_hash TEXT NOT NULL,
+                    decision_status TEXT NOT NULL,
+                    verified_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    metadata_json TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_legal_entity ON trusted_legal_decisions(entity_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_legal_vat ON trusted_legal_decisions(vat_number)"
             )
             conn.execute("COMMIT")
         except Exception:
@@ -334,6 +357,110 @@ class StagingStore:
                 except sqlite3.Error:
                     pass
             raise
+        finally:
+            conn.close()
+
+    def save_legal_decision(self, decision: TrustedLegalVerificationDecision) -> None:
+        self.initialize()
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO trusted_legal_decisions
+                    (decision_id, entity_id, vat_number, legal_name, registry_source,
+                     request_ref, source_data_hash, decision_status, verified_at, expires_at, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(decision_id) DO UPDATE SET
+                    entity_id=excluded.entity_id,
+                    vat_number=excluded.vat_number,
+                    legal_name=excluded.legal_name,
+                    registry_source=excluded.registry_source,
+                    request_ref=excluded.request_ref,
+                    source_data_hash=excluded.source_data_hash,
+                    decision_status=excluded.decision_status,
+                    verified_at=excluded.verified_at,
+                    expires_at=excluded.expires_at,
+                    metadata_json=excluded.metadata_json
+                """,
+                (
+                    decision.decision_id,
+                    decision.entity_id,
+                    decision.vat_number,
+                    decision.legal_name,
+                    decision.registry_source,
+                    decision.request_ref,
+                    decision.source_data_hash,
+                    decision.decision_status,
+                    str(decision.verified_at),
+                    str(decision.expires_at) if decision.expires_at else None,
+                    json.dumps(decision.metadata, ensure_ascii=False),
+                ),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            conn.close()
+
+    def get_legal_decision(
+        self,
+        entity_id: str | None = None,
+        vat_number: str | None = None,
+    ) -> TrustedLegalVerificationDecision | None:
+        self.initialize()
+        conn = self.connect()
+        try:
+            row = None
+            if entity_id and vat_number:
+                row = conn.execute(
+                    """
+                    SELECT * FROM trusted_legal_decisions
+                    WHERE entity_id = ? OR vat_number = ?
+                    ORDER BY verified_at DESC LIMIT 1
+                    """,
+                    (entity_id, vat_number),
+                ).fetchone()
+            elif entity_id:
+                row = conn.execute(
+                    """
+                    SELECT * FROM trusted_legal_decisions
+                    WHERE entity_id = ?
+                    ORDER BY verified_at DESC LIMIT 1
+                    """,
+                    (entity_id,),
+                ).fetchone()
+            elif vat_number:
+                row = conn.execute(
+                    """
+                    SELECT * FROM trusted_legal_decisions
+                    WHERE vat_number = ?
+                    ORDER BY verified_at DESC LIMIT 1
+                    """,
+                    (vat_number,),
+                ).fetchone()
+
+            if not row:
+                return None
+
+            return TrustedLegalVerificationDecision(
+                decision_id=row["decision_id"],
+                entity_id=row["entity_id"],
+                vat_number=row["vat_number"],
+                legal_name=row["legal_name"],
+                registry_source=row["registry_source"],
+                request_ref=row["request_ref"],
+                source_data_hash=row["source_data_hash"],
+                decision_status=row["decision_status"],
+                verified_at=row["verified_at"],
+                expires_at=row["expires_at"],
+                metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+            )
         finally:
             conn.close()
 

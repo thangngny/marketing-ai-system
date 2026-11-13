@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 from marketing_system.config import Settings
 from marketing_system.constants import Environment
-from marketing_system.models import Lead, BusinessEvent, DedupeDecision, EvidenceStatus
+from marketing_system.models import Lead, BusinessEvent, DedupeDecision, EvidenceStatus, TrustedLegalVerificationDecision
 from marketing_system.storage import StagingStore, EventConflictError
 from marketing_system.tools.catalog import (
     FindExistingIn,
@@ -197,6 +197,19 @@ def test_v8_003_authoritative_registry_evidence_qualifies_entity(tmp_path):
     """
     V8-003: Valid VAT checksum WITH authoritative registry evidence qualifies entity.
     """
+    db_path = tmp_path / "marketing.db"
+    store = StagingStore(db_path)
+    store.initialize()
+    store.save_legal_decision(TrustedLegalVerificationDecision(
+        entity_id="Cong Ty Real Co Giay Phep Dang Ky",
+        vat_number="0107889123",
+        legal_name="Cong Ty Real Co Giay Phep Dang Ky",
+        registry_source="national_tax_portal",
+        request_ref="req-v8-003",
+        source_data_hash="hash-v8-003",
+        decision_status="VERIFIED",
+    ))
+
     settings = Settings(environment=Environment.MOCK, data_dir=tmp_path)
     ctx = ToolContext(correlation_id="v8-003-auth")
     rt = HubRuntime(settings=settings, ctx=ctx, registry=None, artifacts_dir=tmp_path / "artifacts")

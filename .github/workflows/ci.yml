@@ -64,7 +64,7 @@ jobs:
         run: |
           python -m pytest -v tests/
 
-      - name: Verify 12 Production Invariants & V4-V9 Defect Remediations
+      - name: Verify 12 Production Invariants & V4-V10 Defect Remediations
         env:
           ENVIRONMENT: production
           SAFE_DRY_RUN: 'true'
@@ -73,7 +73,7 @@ jobs:
           BUZZ_BUZZ_AI_USAGE_CENTER_DIR: ${{ github.workspace }}/buzz-ai-usage-center
           BUZZ_BUZZ_MARKETING_OS_ENTERPRISE_SUITE_DIR: ${{ github.workspace }}/Buzz-Marketing-OS-Enterprise-Suite
         run: |
-          python -m pytest -v tests/test_v4_production_invariants.py tests/test_v4_reproduce_defects.py tests/test_v8_defect_reproduction.py tests/test_v8_remediation_and_adversarial_suite.py tests/test_v9_remediation_and_adversarial_suite.py
+          python -m pytest -v tests/test_v4_production_invariants.py tests/test_v4_reproduce_defects.py tests/test_v8_defect_reproduction.py tests/test_v8_remediation_and_adversarial_suite.py tests/test_v9_remediation_and_adversarial_suite.py tests/test_v10_remediation_and_adversarial_suite.py
 
       - name: Verify Cross-Repository Behavioral Test Suites
         env:
