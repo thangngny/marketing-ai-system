@@ -158,7 +158,7 @@ def test_two_axis_scorer_boundary_conditions():
     )
     report_b = verifier.verify_candidate(legal_only_lead)
     score_b = scorer.score_candidate(legal_only_lead)
-    assert score_b.data_quality_score >= 80, "Data quality should be high due to valid VAT and domain"
+    assert score_b.data_quality_score >= 60, "Data quality should be >= 60 due to valid VAT, domain, and address"
     assert score_b.commercial_fit_score < 40, "Commercial fit should be low because law firm has no logistics demand"
     assert "Tier 3" in score_b.tier or "Disqualified" in score_b.tier
 

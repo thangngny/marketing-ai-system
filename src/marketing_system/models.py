@@ -142,6 +142,18 @@ class EvidenceStatus(str):
     REJECTED = "REJECTED"
 
 
+class EvidenceStatus(str):
+    FORMAT_VALID = "FORMAT_VALID"
+    SOURCE_OBSERVED = "SOURCE_OBSERVED"
+    SOURCE_CORROBORATED = "SOURCE_CORROBORATED"
+    VERIFIED = "VERIFIED"
+    INFERRED = "INFERRED"
+    UNKNOWN = "UNKNOWN"
+    CONFLICTED = "CONFLICTED"
+    REJECTED = "REJECTED"
+    LEGACY_IMPORT = "LEGACY_IMPORT"
+
+
 class EvidenceItem(BaseModel):
     field_name: str
     field_value: Any
@@ -150,7 +162,7 @@ class EvidenceItem(BaseModel):
     observed_at: datetime = Field(default_factory=utc_now)
     verified_at: datetime | None = None
     verification_method: str = "direct_api"
-    evidence_status: Literal["VERIFIED", "INFERRED", "LEGACY_IMPORT", "REJECTED"] = "INFERRED"
+    evidence_status: str = "INFERRED"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     raw_evidence: str | None = None
 
@@ -196,7 +208,7 @@ class LeadCandidate(BaseModel):
         field_name: str,
         field_value: Any,
         source_provider: str,
-        evidence_status: Literal["VERIFIED", "INFERRED", "LEGACY_IMPORT", "REJECTED"] = "INFERRED",
+        evidence_status: str = "INFERRED",
         source_url: str | None = None,
         verification_method: str = "direct_api",
         confidence: float = 1.0,
@@ -208,7 +220,7 @@ class LeadCandidate(BaseModel):
             source_url=source_url,
             source_provider=source_provider,
             observed_at=utc_now(),
-            verified_at=utc_now() if evidence_status == "VERIFIED" else None,
+            verified_at=utc_now() if evidence_status in ("VERIFIED", "SOURCE_CORROBORATED") else None,
             verification_method=verification_method,
             evidence_status=evidence_status,
             confidence=confidence,
@@ -221,7 +233,7 @@ class LeadCandidate(BaseModel):
         return {
             e.field_name: e.field_value
             for e in self.evidence
-            if e.evidence_status == "VERIFIED"
+            if e.evidence_status in ("VERIFIED", "SOURCE_CORROBORATED")
         }
 
     def get_inferred_fields(self) -> dict[str, Any]:
@@ -229,6 +241,13 @@ class LeadCandidate(BaseModel):
             e.field_name: e.field_value
             for e in self.evidence
             if e.evidence_status == "INFERRED"
+        }
+
+    def get_format_valid_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status in ("FORMAT_VALID", "SOURCE_OBSERVED", "SOURCE_CORROBORATED", "VERIFIED")
         }
 
 

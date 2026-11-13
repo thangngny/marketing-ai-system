@@ -1,0 +1,58 @@
+name: Buzz GTM AI - Continuous Integration & Production Invariant Audit
+
+on:
+  push:
+    branches:
+      - main
+      - marketing-system-phase1
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - marketing-system-phase1
+
+jobs:
+  test-and-verify:
+    name: Pytest & 12 Production Invariants
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-cov pypiwin32
+
+      - name: Verify Code Compilation
+        run: |
+          python -m compileall src tests
+
+      - name: Run Full Test Suite (Unit, Integration, Resilience)
+        env:
+          ENVIRONMENT: sandbox
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+        run: |
+          python -m pytest -v tests/
+
+      - name: Verify 12 Production Invariants & Defect Remediations
+        env:
+          ENVIRONMENT: production
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+        run: |
+          python -m pytest -v tests/test_v4_production_invariants.py tests/test_v4_reproduce_defects.py

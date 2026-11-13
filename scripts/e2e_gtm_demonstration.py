@@ -183,7 +183,9 @@ def run_e2e_demonstration():
     demo_artifacts["step9_dossier"] = dossier.model_dump(mode="json")
 
     # Save output to delivery folder
-    delivery_out = Path(r"C:\Users\Admin\BUZZ_GTM_V2_DELIVERY\e2e_demo_output.json")
+    delivery_dir = Path(r"C:\Users\Admin\BUZZ_GTM_V4_DELIVERY")
+    delivery_dir.mkdir(parents=True, exist_ok=True)
+    delivery_out = delivery_dir / "e2e_simulation_report.json"
     delivery_out.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n================================================================================")
     print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {delivery_out}")
