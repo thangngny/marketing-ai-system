@@ -77,14 +77,33 @@ def test_lead_verifier_and_scorer_pipeline():
         environment=Environment.MOCK,
     )
 
-    # 1. Verification
+    # 1. Verification without authoritative registry: format valid & observed, NOT verified
     report = verifier.verify_candidate(candidate)
     assert report.is_valid_lead is True
-    assert "vat_number" in report.verified_fields
-    assert "legal_name" in report.verified_fields
+    assert "vat_number" in report.format_valid_fields
+    assert "legal_name" in report.observed_fields
+    assert "vat_number" not in report.verified_fields
+    assert "legal_name" not in report.verified_fields
+    assert report.status == "FORMAT_VALID"
     assert "logistics_classification" in report.inferred_fields
 
-    # 2. Scoring
+    # 2. Verification with authoritative registry confirmation
+    from unittest.mock import MagicMock
+    mock_reg = MagicMock()
+    mock_reg.check_active_business.return_value = (True, "CÔNG TY CỔ PHẦN THIẾT BỊ CHẨN ĐOÁN MEDEQUIP VINA")
+    verifier_auth = LeadVerifier(registry_client=mock_reg)
+    report_auth = verifier_auth.verify_candidate(candidate)
+    assert report_auth.status == "VERIFIED"
+    assert "vat_number" in report_auth.verified_fields
+    assert "legal_name" in report_auth.verified_fields
+
+    # 3. Scoring gate: NOT_CHECKED dedupe status blocks Tier 1
+    candidate.crm_dedupe_status = "NOT_CHECKED"
+    score_card_blocked = scorer.score_candidate(candidate)
+    assert score_card_blocked.tier != "Tier 1 - High Priority"
+
+    # 4. Scoring gate: NOT_FOUND_VERIFIED enables Tier 1
+    candidate.crm_dedupe_status = "NOT_FOUND_VERIFIED"
     score_card = scorer.score_candidate(candidate)
     assert score_card.data_quality_score >= 80
     assert score_card.commercial_fit_score >= 70

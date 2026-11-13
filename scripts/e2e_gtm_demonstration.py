@@ -107,6 +107,7 @@ def run_e2e_demonstration():
 
         c.in_crm = is_dup
         c.crm_match = dup_reason if is_dup else None
+        c.crm_dedupe_status = "DUPLICATE_CONFIRMED" if is_dup else "NOT_FOUND_VERIFIED"
 
         score_card = scorer.score_candidate(c)
         status_sym = "✅" if rep.is_valid_lead and not is_dup else ("⚠️ ĐÃ CÓ TRONG CRM" if is_dup else "❌")
@@ -182,13 +183,18 @@ def run_e2e_demonstration():
     print(f"  ✓ Task đề xuất cho Sales: \"{dossier.task_proposal.subject}\" (Hạn: {dossier.task_proposal.due_in_days} ngày)")
     demo_artifacts["step9_dossier"] = dossier.model_dump(mode="json")
 
-    # Save output to delivery folder
-    delivery_dir = Path(r"C:\Users\Admin\BUZZ_GTM_V4_DELIVERY")
-    delivery_dir.mkdir(parents=True, exist_ok=True)
-    delivery_out = delivery_dir / "e2e_simulation_report.json"
-    delivery_out.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Save output to delivery folders
+    delivery_dir_v5 = Path(r"C:\Users\Admin\BUZZ_GTM_V5_DELIVERY")
+    delivery_dir_v5.mkdir(parents=True, exist_ok=True)
+    delivery_out_v5 = delivery_dir_v5 / "e2e_simulation_report.json"
+    delivery_out_v5.write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    delivery_dir_v4 = Path(r"C:\Users\Admin\BUZZ_GTM_V4_DELIVERY")
+    delivery_dir_v4.mkdir(parents=True, exist_ok=True)
+    (delivery_dir_v4 / "e2e_simulation_report.json").write_text(json.dumps(demo_artifacts, ensure_ascii=False, indent=2), encoding="utf-8")
+
     print(f"\n================================================================================")
-    print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {delivery_out}")
+    print(f"   DEMONSTRATION THÀNH CÔNG 100%! BẰNG CHỨNG LƯU TẠI: {delivery_out_v5}")
     print(f"================================================================================\n")
 
 

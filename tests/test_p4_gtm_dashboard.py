@@ -11,8 +11,11 @@ import re
 import sys
 from pathlib import Path
 import pytest
+from conftest import get_sibling_workspace_path
 
-DASHBOARD_PATH = Path(r"C:\Users\Admin\buzz-ai-usage-center\bin\dashboard.py")
+DASHBOARD_PATH = get_sibling_workspace_path("buzz-ai-usage-center/bin/dashboard.py")
+if not DASHBOARD_PATH or not DASHBOARD_PATH.exists():
+    pytest.skip("buzz-ai-usage-center/bin/dashboard.py not found in workspace", allow_module_level=True)
 
 
 def test_gtm_funnel_route_and_view_present():

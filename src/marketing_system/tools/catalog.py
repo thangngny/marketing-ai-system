@@ -180,7 +180,7 @@ class ContentDraftIn(BaseModel):
 
 class CodexRunIn(BaseModel):
     prompt: str = Field(..., description="Prompt or task instructions to execute via OpenAI Codex CLI/App")
-    cwd: str = Field("C:/Users/Admin", description="Working directory for task execution")
+    cwd: str = Field(default_factory=lambda: str(Path.home()), description="Working directory for task execution")
     model: str | None = Field(None, description="Optional model override (defaults to config: gpt-5.6-sol)")
 
 
@@ -816,7 +816,7 @@ def analytics_snapshot(args: NoInput, rt: HubRuntime) -> dict[str, Any]:
 
 
 def codex_run(inp: CodexRunIn, rt: HubRuntime) -> dict[str, Any]:
-    control_js = "C:\\Users\\Admin\\AppData\\Local\\agy\\bin\\codex-control.js"
+    control_js = str(Path.home() / "AppData" / "Local" / "agy" / "bin" / "codex-control.js")
     cmd = ["node", control_js, "exec", inp.prompt, "--cd", inp.cwd, "--json"]
     if inp.model:
         cmd.extend(["--model", inp.model])
@@ -867,7 +867,7 @@ def codex_open(inp: CodexOpenIn, rt: HubRuntime) -> dict[str, Any]:
 
 
 def codex_status(inp: CodexStatusIn, rt: HubRuntime) -> dict[str, Any]:
-    codex_bin = "C:\\Users\\Admin\\.codex\\packages\\standalone\\current\\bin\\codex.exe"
+    codex_bin = str(Path.home() / ".codex" / "packages" / "standalone" / "current" / "bin" / "codex.exe")
     cli_exists = Path(codex_bin).exists()
 
     desktop_app_running = False

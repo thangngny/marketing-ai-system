@@ -10,10 +10,37 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
 LIVE = os.getenv("RUN_LIVE_CONNECTOR_TESTS") == "1"
+
+
+def get_sibling_workspace_path(subpath: str) -> Path | None:
+    """
+    Locates cross-repository files portably across developer machines,
+    CI runners, and relative workspaces.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    sub_parts = subpath.replace("\\", "/").strip("/").split("/")
+    repo_name = sub_parts[0]
+    rest_path = "/".join(sub_parts[1:]) if len(sub_parts) > 1 else ""
+
+    candidates = [
+        # 1. Environment variable override
+        Path(os.environ.get(f"BUZZ_{repo_name.upper().replace('-', '_')}_DIR", "")) / rest_path if rest_path else Path(os.environ.get(f"BUZZ_{repo_name.upper().replace('-', '_')}_DIR", "")),
+        # 2. Sibling directory in CI runner or multi-repo workspace
+        repo_root.parent / subpath,
+        # 3. Subdirectory inside current repo (if nested checkout)
+        repo_root / subpath,
+        # 4. User home directory (standard local layout)
+        Path.home() / subpath,
+    ]
+    for c in candidates:
+        if c and c.exists():
+            return c.resolve()
+    return None
 
 # Never let tests write into the real data/ or logs/ directories.
 _SCRATCH = tempfile.mkdtemp(prefix="marketing-tests-")

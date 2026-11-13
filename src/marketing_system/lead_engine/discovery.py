@@ -103,11 +103,17 @@ class ApolloDiscoveryProvider(BaseDiscoveryProvider):
                         confidence=0.80
                     )
                     candidates.append(c)
-                self.last_status = "SUCCESS"
+                self.last_status = "SUCCESS" if candidates else "SUCCESS_EMPTY"
                 return candidates[:filter_spec.limit]
             except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "rate limit" in err_str:
+                    self.last_status = "RATE_LIMITED"
+                elif "timeout" in err_str or "timed out" in err_str or "connection" in err_str:
+                    self.last_status = "SOURCE_UNAVAILABLE"
+                else:
+                    self.last_status = f"SOURCE_ERROR: {e}"
                 logger.error("Apollo live discovery query failed: %s", e)
-                self.last_status = f"ERROR: {e}"
                 # CRITICAL INVARIANT: In production or staging, NEVER fall back to fixtures on error!
                 return []
 
@@ -169,11 +175,17 @@ class TradeManifestDiscoveryProvider(BaseDiscoveryProvider):
                         verification_method="customs_manifest_analysis"
                     )
                     candidates.append(c)
-                self.last_status = "SUCCESS"
+                self.last_status = "SUCCESS" if candidates else "SUCCESS_EMPTY"
                 return candidates[:filter_spec.limit]
             except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "rate limit" in err_str:
+                    self.last_status = "RATE_LIMITED"
+                elif "timeout" in err_str or "timed out" in err_str or "connection" in err_str:
+                    self.last_status = "SOURCE_UNAVAILABLE"
+                else:
+                    self.last_status = f"SOURCE_ERROR: {e}"
                 logger.error("Trade manifest query failed: %s", e)
-                self.last_status = f"ERROR: {e}"
                 return []
 
         # Production / Staging without live manifest license: fail closed safely
@@ -191,7 +203,11 @@ class MockDiscoveryProvider(BaseDiscoveryProvider):
     """Explicit mock provider used ONLY in testing and demonstration environments."""
     name: str = "mock_curated"
 
+    def __init__(self):
+        self.last_status: str = "INITIALIZED"
+
     def discover(self, filter_spec: DiscoveryFilter, env: Environment) -> List[LeadCandidate]:
+        self.last_status = "MOCK_FIXTURE_USED"
         return _get_curated_mock_candidates(limit=filter_spec.limit, source_tag="mock_curated", env=Environment.MOCK)
 
 
@@ -308,8 +324,8 @@ class DynamicDiscoveryEngine:
         seen_companies = set()
         for prov in self.providers:
             sources_used.append(prov.name)
-            source_statuses[prov.name] = prov.get_status(env)
             results = prov.discover(filter_spec, env)
+            source_statuses[prov.name] = getattr(prov, "last_status", prov.get_status(env))
             for cand in results:
                 # Invariant: In production, reject any synthetic records
                 if env in (Environment.PRODUCTION, Environment.SANDBOX) and cand.synthetic:

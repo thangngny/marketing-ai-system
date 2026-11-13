@@ -172,6 +172,9 @@ def test_invariant_06_no_permission_no_external_crm_writes():
         crm_create_task(task_in, mock_rt)
 
 
+from conftest import get_sibling_workspace_path
+
+
 # ==============================================================================
 # Invariant 7: Mock event must never increase production business KPIs.
 # ==============================================================================
@@ -179,7 +182,9 @@ def _load_funnel_fn():
     from pathlib import Path
     import re
     import json
-    dashboard_path = Path(r"C:\Users\Admin\buzz-ai-usage-center\bin\dashboard.py")
+    dashboard_path = get_sibling_workspace_path("buzz-ai-usage-center/bin/dashboard.py")
+    if not dashboard_path or not dashboard_path.exists():
+        pytest.skip("buzz-ai-usage-center/bin/dashboard.py not found in workspace")
     content = dashboard_path.read_text(encoding="utf-8")
     namespace = {"Path": Path, "json": json, "os": os, "sqlite3": sqlite3}
     match = re.search(r"(def get_gtm_funnel_data\(.*?\)\s*->\s*dict:.*?)(?=def v_gtm_funnel)", content, re.DOTALL)

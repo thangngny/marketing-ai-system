@@ -64,12 +64,15 @@ def test_dpapi_corrupted_payload_recovery(tmp_path):
     assert result is None, "Non-JSON plaintext must return None without crashing"
 
 
+from conftest import get_sibling_workspace_path
+
+
 def test_cross_process_lock_contention(tmp_path):
     """Test inter-process lock behavior during contention."""
     import importlib.util
     
-    dedupe_script = Path(r"C:\Users\Admin\Buzz-Marketing-OS-Enterprise-Suite\03-Marketing-Hub\services\lead-pipeline\zoho_live_dedupe.py")
-    if not dedupe_script.exists():
+    dedupe_script = get_sibling_workspace_path("Buzz-Marketing-OS-Enterprise-Suite/03-Marketing-Hub/services/lead-pipeline/zoho_live_dedupe.py")
+    if not dedupe_script or not dedupe_script.exists():
         pytest.skip("zoho_live_dedupe.py not found in local path")
         
     spec = importlib.util.spec_from_file_location("zoho_live_dedupe", str(dedupe_script))
@@ -212,8 +215,8 @@ def test_workflow_approval_tamper_protection(tmp_path):
 
 def test_dashboard_token_security_barrier():
     """Verify dashboard bearer token authentication barrier rejects unauthorized requests."""
-    dashboard_path = Path(r"C:\Users\Admin\buzz-ai-usage-center\bin\dashboard.py")
-    if not dashboard_path.exists():
+    dashboard_path = get_sibling_workspace_path("buzz-ai-usage-center/bin/dashboard.py")
+    if not dashboard_path or not dashboard_path.exists():
         pytest.skip("dashboard.py not found in buzz-ai-usage-center")
         
     code = dashboard_path.read_text(encoding="utf-8")

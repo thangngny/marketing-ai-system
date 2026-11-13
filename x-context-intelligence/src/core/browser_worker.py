@@ -35,7 +35,8 @@ class BrowserLock:
         self.job_id = job_id
         self.timeout = timeout
         self.mutex_name = mutex_name
-        self.lock_dir = lock_dir or Path(r"C:\Users\Admin\.buzz\chrome_profiles")
+        self.lock_dir = lock_dir or (Path.home() / ".buzz" / "chrome_profiles")
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
         self.lock_file = self.lock_dir / "browser_lock.json"
         self._kernel32 = ctypes.windll.kernel32
         self._handle = None

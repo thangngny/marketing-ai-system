@@ -184,6 +184,13 @@ class LeadCandidate(BaseModel):
     environment: Environment
     synthetic: bool = False
     in_crm: bool = False
+    crm_dedupe_status: Literal[
+        "NOT_CHECKED",
+        "CHECK_FAILED",
+        "POSSIBLE_DUPLICATE",
+        "DUPLICATE_CONFIRMED",
+        "NOT_FOUND_VERIFIED",
+    ] = "NOT_CHECKED"
     crm_match: str | None = None
     score: int = Field(default=0, ge=0, le=100)
     data_quality_score: int = Field(default=0, ge=0, le=100)
@@ -230,24 +237,56 @@ class LeadCandidate(BaseModel):
         return item
 
     def get_verified_fields(self) -> dict[str, Any]:
+        """Authoritative confirmed fields only."""
         return {
             e.field_name: e.field_value
             for e in self.evidence
-            if e.evidence_status in ("VERIFIED", "SOURCE_CORROBORATED")
+            if e.evidence_status == EvidenceStatus.VERIFIED
+        }
+
+    def get_corroborated_fields(self) -> dict[str, Any]:
+        """Fields corroborated across multiple sources."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.SOURCE_CORROBORATED
+        }
+
+    def get_observed_fields(self) -> dict[str, Any]:
+        """Fields observed from discovery sources."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.SOURCE_OBSERVED
+        }
+
+    def get_format_valid_fields(self) -> dict[str, Any]:
+        """Fields that passed syntax/format checks but lack registry verification."""
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == EvidenceStatus.FORMAT_VALID
+        }
+
+    def get_raw_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status in (EvidenceStatus.FORMAT_VALID, EvidenceStatus.SOURCE_OBSERVED, EvidenceStatus.UNKNOWN)
         }
 
     def get_inferred_fields(self) -> dict[str, Any]:
         return {
             e.field_name: e.field_value
             for e in self.evidence
-            if e.evidence_status == "INFERRED"
+            if e.evidence_status == EvidenceStatus.INFERRED
         }
 
-    def get_format_valid_fields(self) -> dict[str, Any]:
+    def get_conflicted_fields(self) -> dict[str, Any]:
         return {
             e.field_name: e.field_value
             for e in self.evidence
-            if e.evidence_status in ("FORMAT_VALID", "SOURCE_OBSERVED", "SOURCE_CORROBORATED", "VERIFIED")
+            if e.evidence_status == EvidenceStatus.CONFLICTED
         }
 
 

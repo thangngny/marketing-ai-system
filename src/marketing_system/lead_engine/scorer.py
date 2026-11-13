@@ -149,7 +149,8 @@ class TwoAxisScorer:
         has_valid_vat = dq_breakdown.get("vat_number_verified", 0) >= 15
         has_valid_domain = dq_breakdown.get("domain_verified", 0) >= 12
         has_valid_company = dq_breakdown.get("legal_name_verified", 0) >= 15
-        not_in_crm = not getattr(candidate, "in_crm", False)
+        dedupe_status = getattr(candidate, "crm_dedupe_status", "NOT_CHECKED")
+        is_dedupe_cleared = (dedupe_status == "NOT_FOUND_VERIFIED") and (not getattr(candidate, "in_crm", False))
 
         tier1_eligible = (
             composite >= 75
@@ -158,15 +159,28 @@ class TwoAxisScorer:
             and has_valid_vat
             and has_valid_domain
             and has_valid_company
-            and not_in_crm
+            and is_dedupe_cleared
+        )
+
+        is_authoritative_verified = bool(
+            legal_ev and legal_ev.evidence_status == EvidenceStatus.VERIFIED
+            and vat_ev and vat_ev.evidence_status == EvidenceStatus.VERIFIED
         )
 
         if tier1_eligible:
             tier = "Tier 1 - High Priority"
-            reason = "Doanh nghiệp chuẩn ICP Vận tải Hàng không & Thông quan chuyên trách, định danh pháp nhân đã xác thực đầy đủ."
+            if is_authoritative_verified:
+                reason = "Doanh nghiệp chuẩn ICP Vận tải Hàng không & Thông quan chuyên trách, định danh pháp nhân đã xác thực cơ quan nhà nước, CRM đã xác nhận không trùng lặp."
+            else:
+                reason = "Doanh nghiệp chuẩn ICP Vận tải Hàng không & Thông quan chuyên trách, định danh cú pháp hợp lệ, CRM đã xác nhận không trùng lặp."
         elif composite >= 55 and dq_score >= 45:
             tier = "Tier 2 - Qualified"
-            reason = "Doanh nghiệp có tiềm năng thương mại tốt, dữ liệu cơ bản hợp lệ, cần bổ sung thêm thông tin vận hành."
+            if dedupe_status not in ("NOT_FOUND_VERIFIED", "NOT_CHECKED") or getattr(candidate, "in_crm", False):
+                reason = "Doanh nghiệp tiềm năng tốt nhưng phát hiện trùng lặp hoặc cần đối soát CRM."
+            elif dedupe_status == "NOT_CHECKED":
+                reason = "Doanh nghiệp tiềm năng thương mại tốt, dữ liệu cơ bản hợp lệ, chưa hoàn tất kiểm tra trùng lặp CRM."
+            else:
+                reason = "Doanh nghiệp có tiềm năng thương mại tốt, dữ liệu cơ bản hợp lệ, cần bổ sung thêm thông tin vận hành."
         elif composite >= 35 and has_valid_company:
             tier = "Tier 3 - Nurture"
             reason = "Tiềm năng trung bình hoặc chưa đủ thông tin xác thực, đưa vào danh sách nuôi dưỡng dài hạn."

@@ -26,10 +26,14 @@ from ..models import LeadCandidate, EvidenceItem, EvidenceStatus, utc_now
 
 class VerificationReport(BaseModel):
     is_valid_lead: bool
-    status: str  # "VERIFIED", "FORMAT_VALID", "PARTIALLY_VERIFIED", "REJECTED"
-    verified_fields: Dict[str, Any] = Field(default_factory=dict)
+    status: str  # "VERIFIED", "SOURCE_CORROBORATED", "FORMAT_VALID", "SOURCE_OBSERVED", "REJECTED"
+    raw_fields: Dict[str, Any] = Field(default_factory=dict)
     format_valid_fields: Dict[str, Any] = Field(default_factory=dict)
+    observed_fields: Dict[str, Any] = Field(default_factory=dict)
+    corroborated_fields: Dict[str, Any] = Field(default_factory=dict)
+    verified_fields: Dict[str, Any] = Field(default_factory=dict)
     inferred_fields: Dict[str, Any] = Field(default_factory=dict)
+    conflicted_fields: Dict[str, Any] = Field(default_factory=dict)
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
@@ -131,9 +135,25 @@ class LeadVerifier:
         candidate.stage = "VERIFYING"
         errors: List[str] = []
         warnings: List[str] = []
-        verified_fields: Dict[str, Any] = {}
+        raw_fields: Dict[str, Any] = {}
         format_valid_fields: Dict[str, Any] = {}
+        observed_fields: Dict[str, Any] = {}
+        corroborated_fields: Dict[str, Any] = {}
+        verified_fields: Dict[str, Any] = {}
         inferred_fields: Dict[str, Any] = {}
+        conflicted_fields: Dict[str, Any] = {}
+
+        # ---------------- 0. Capture Raw Observed Input ----------------
+        if candidate.company:
+            raw_fields["company"] = candidate.company
+        if candidate.vat_number:
+            raw_fields["vat_number"] = candidate.vat_number
+        if candidate.domain:
+            raw_fields["domain"] = candidate.domain
+        if candidate.email:
+            raw_fields["email"] = candidate.email
+        if candidate.phone:
+            raw_fields["phone"] = candidate.phone
 
         # ---------------- 1. VAT / Tax Code Verification ----------------
         vat_ok, vat_res = validate_vietnam_vat(candidate.vat_number)
@@ -166,7 +186,7 @@ class LeadVerifier:
                 else:
                     errors.append(f"Mã số thuế {vat_res} đã ngừng hoạt động hoặc bị đóng mã")
             else:
-                # Syntax & province valid, unconfirmed on live registry: FORMAT_VALID
+                # Syntax & province valid, unconfirmed on live registry: FORMAT_VALID ONLY
                 candidate.add_evidence(
                     field_name="vat_number",
                     field_value=vat_res,
@@ -176,7 +196,7 @@ class LeadVerifier:
                     confidence=0.75,
                 )
                 format_valid_fields["vat_number"] = vat_res
-                verified_fields["vat_number"] = vat_res
+                # NEVER add to verified_fields without authoritative confirmation!
         else:
             if candidate.vat_number:
                 errors.append(f"Lỗi VAT: {vat_res}")
@@ -195,7 +215,7 @@ class LeadVerifier:
         # ---------------- 2. Legal Name / Company Identity ----------------
         clean_name = (candidate.company or "").strip()
         if len(clean_name) >= 3:
-            # Having a company name string from discovery is SOURCE_OBSERVED
+            # Having a company name string from discovery is SOURCE_OBSERVED unless verified by registry
             if "legal_name" not in verified_fields:
                 candidate.legal_name = clean_name
                 candidate.add_evidence(
@@ -206,8 +226,8 @@ class LeadVerifier:
                     verification_method="source_extraction",
                     confidence=0.60,
                 )
-                format_valid_fields["legal_name"] = clean_name
-                verified_fields["legal_name"] = clean_name
+                observed_fields["legal_name"] = clean_name
+                # NEVER add to verified_fields here!
         else:
             errors.append(f"Tên công ty quá ngắn hoặc rỗng: '{clean_name}'")
             candidate.add_evidence(
@@ -230,7 +250,7 @@ class LeadVerifier:
                     verification_method="dns_a_record_query",
                     confidence=0.85,
                 )
-                verified_fields["domain_active"] = candidate.domain
+                corroborated_fields["domain_active"] = candidate.domain
             else:
                 candidate.add_evidence(
                     field_name="domain_active",
@@ -281,21 +301,31 @@ class LeadVerifier:
                 confidence=0.80,
             )
 
-        # Overall Lead Status Determination
+        # ---------------- 6. Overall Status Determination ----------------
         is_valid = len(errors) == 0 and bool(clean_name and len(clean_name) >= 3)
-        if len(verified_fields) >= 2:
-            overall_status = "VERIFIED"
-        elif is_valid:
-            overall_status = "FORMAT_VALID"
-        else:
+        if not is_valid:
             overall_status = "REJECTED"
+        elif "vat_number" in verified_fields and "legal_name" in verified_fields:
+            overall_status = "VERIFIED"
+        elif len(corroborated_fields) > 0:
+            overall_status = "SOURCE_CORROBORATED"
+        elif len(format_valid_fields) > 0:
+            overall_status = "FORMAT_VALID"
+        elif len(observed_fields) > 0:
+            overall_status = "SOURCE_OBSERVED"
+        else:
+            overall_status = "UNKNOWN"
 
         return VerificationReport(
             is_valid_lead=is_valid,
             status=overall_status,
-            verified_fields=verified_fields,
+            raw_fields=raw_fields,
             format_valid_fields=format_valid_fields,
+            observed_fields=observed_fields,
+            corroborated_fields=corroborated_fields,
+            verified_fields=verified_fields,
             inferred_fields=inferred_fields,
+            conflicted_fields=conflicted_fields,
             errors=errors,
             warnings=warnings,
         )

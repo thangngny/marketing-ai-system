@@ -1,10 +1,16 @@
-import subprocess, json, sys
+import subprocess, json, sys, os
+from pathlib import Path
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+X_CTX_SERVER = REPO_ROOT / "x-context-intelligence" / "mcp" / "server.py"
+
 @pytest.mark.parametrize("name, script_path, expected_count", [
-    ("x-context-intelligence", r"C:\Users\Admin\marketing-ai-system\x-context-intelligence\mcp\server.py", 10)
+    ("x-context-intelligence", str(X_CTX_SERVER), 10)
 ])
 def test_mcp(name, script_path, expected_count):
+    if not Path(script_path).exists():
+        pytest.skip(f"MCP server script {script_path} does not exist")
     p = subprocess.Popen(
         [sys.executable, script_path],
         stdin=subprocess.PIPE,
