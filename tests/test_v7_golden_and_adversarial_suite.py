@@ -303,7 +303,18 @@ def test_golden_dataset_six_entities_end_to_end(tmp_path):
     assert len(gate_records) == 1, "Gate must receive ONLY the 1 eligible record"
     assert gate_records[0]["company"] == "Công ty TNHH Y Tế Hoàn Hảo"
 
-    # Finalize Stage Verification
+    # Finalize Stage Verification with approved record
+    from marketing_system.workflows.approvals import payload_hash
+    expected_digest = payload_hash("workflow.stage_leads_for_crm", eligible)
+    mock_engine = MagicMock()
+    mock_rec = MagicMock()
+    mock_rec.status = "APPROVED"
+    mock_rec.expired.return_value = False
+    mock_rec.payload_hash = expected_digest
+    mock_engine.approvals.get.return_value = mock_rec
+    step_ctx.engine = mock_engine
+    step_ctx.outputs["approval_gate"] = {"approval_id": "appr-golden-v7"}
+
     finalize_outcome = step_gtm_finalize_stage(step_ctx)
     assert finalize_outcome.output["approved_count"] == 1
     assert finalize_outcome.output["stage_status"] == "APPROVED_FOR_CRM"

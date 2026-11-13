@@ -44,6 +44,7 @@ class FindExistingIn(BaseModel):
     companies: list[str] = Field(default_factory=list, max_length=100)
     domains: list[str] = Field(default_factory=list, max_length=100)
     vats: list[str] = Field(default_factory=list, max_length=100)
+    candidates: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
 
 class TaskIn(BaseModel):
@@ -321,6 +322,19 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
     except Exception:
         pass
 
+    # Initialize candidate keys to check from direct args or structured candidates
+    vats_to_check = list(args.vats)
+    companies_to_check = list(args.companies)
+    domains_to_check = list(args.domains)
+    if getattr(args, "candidates", None):
+        for c in args.candidates:
+            if c.get("vat_number") and str(c["vat_number"]).strip() not in vats_to_check:
+                vats_to_check.append(str(c["vat_number"]).strip())
+            if c.get("company") and str(c["company"]).strip() not in companies_to_check:
+                companies_to_check.append(str(c["company"]).strip())
+            if c.get("domain") and str(c["domain"]).strip() not in domains_to_check:
+                domains_to_check.append(str(c["domain"]).strip())
+
     # 1. Check local VAT cache if available (e.g. Minh Van 3,603 live records)
     vat_cache_path = Path(os.environ.get("BUZZ_VAT_CACHE", str(buzz_dir / "tools" / "zoho_live_vat_cache.json")))
     has_vat_cache = False
@@ -339,7 +353,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             if has_vat_cache:
                 scope_checked.append("zoho_live_vat_cache")
 
-            for raw_vat in args.vats:
+            for raw_vat in vats_to_check:
                 if not raw_vat:
                     continue
                 v_ok, v_norm = validate_vietnam_vat(raw_vat)
@@ -347,7 +361,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
                 if target_vat in cached_vats:
                     matches[raw_vat] = f"vat_cache:{target_vat}"
 
-            for comp in args.companies:
+            for comp in companies_to_check:
                 norm_c = _norm(comp)
                 if norm_c in cached_names:
                     matches[comp] = f"vat_cache_name:{cached_names[norm_c]}"
@@ -357,6 +371,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
     # 2. Query CRM connector for Accounts and Leads (V8-001: True scope verification)
     names: dict[str, str] = {}
     domains: dict[str, str] = {}
+    vats_map: dict[str, str] = {}
     modules_queried: list[str] = []
     scanned = 0
     bounded = False
@@ -367,17 +382,23 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
         for a in accounts:
             a_name = a.get("Account_Name") or a.get("name") or ""
             a_dom = a.get("Website") or a.get("domain") or ""
+            a_vat = a.get("VAT_Number") or a.get("vat") or ""
             if a_name:
                 names[_norm(str(a_name))] = str(a.get("id"))
             if a_dom:
                 domains[_norm(str(a_dom))] = str(a.get("id"))
+            if a_vat:
+                vats_map[str(a_vat).strip()] = str(a.get("id"))
         for l in leads:
             l_name = l.get("Company") or l.get("company") or ""
             l_dom = l.get("Website") or l.get("domain") or ""
+            l_vat = l.get("VAT_Number") or l.get("vat") or ""
             if l_name and _norm(str(l_name)) not in names:
                 names[_norm(str(l_name))] = str(l.get("id"))
             if l_dom and _norm(str(l_dom)) not in domains:
                 domains[_norm(str(l_dom))] = str(l.get("id"))
+            if l_vat and str(l_vat).strip() not in vats_map:
+                vats_map[str(l_vat).strip()] = str(l.get("id"))
         scanned = len(accounts) + len(leads)
         bounded = False
         modules_queried = ["Accounts", "Leads"]
@@ -397,6 +418,8 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
                     names[_norm(str(r["name"]))] = str(r.get("external_id") or r.get("id", ""))
                 if r.get("domain"):
                     domains[_norm(str(r["domain"]))] = str(r.get("external_id") or r.get("id", ""))
+                if r.get("vat") or r.get("VAT_Number"):
+                    vats_map[str(r.get("vat") or r.get("VAT_Number")).strip()] = str(r.get("external_id") or r.get("id", ""))
             scanned_accounts = len(acc_rows)
             bounded_accounts = (scanned_accounts >= 200)
             modules_queried.append("Accounts")
@@ -411,10 +434,13 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             for r in lead_rows:
                 cname = r.get("company") or r.get("name")
                 cdom = r.get("domain") or r.get("website")
+                cvat = r.get("vat") or r.get("VAT_Number")
                 if cname and _norm(str(cname)) not in names:
                     names[_norm(str(cname))] = str(r.get("external_id") or r.get("id", ""))
                 if cdom and _norm(str(cdom)) not in domains:
                     domains[_norm(str(cdom))] = str(r.get("external_id") or r.get("id", ""))
+                if cvat and str(cvat).strip() not in vats_map:
+                    vats_map[str(cvat).strip()] = str(r.get("external_id") or r.get("id", ""))
             scanned_leads = len(lead_rows)
             bounded_leads = (scanned_leads >= 200)
             modules_queried.append("Leads")
@@ -427,14 +453,17 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
         scanned = scanned_accounts + scanned_leads
         bounded = bounded_accounts or bounded_leads
 
-    for company in args.companies:
+    for company in companies_to_check:
         n_comp = _norm(company)
         if n_comp in names and company not in matches:
             matches[company] = str(names[n_comp])
-    for domain in args.domains:
+    for domain in domains_to_check:
         n_dom = _norm(domain)
         if n_dom in domains and domain not in matches:
             matches[domain] = str(domains[n_dom])
+    for vat in vats_to_check:
+        if vat in vats_map and vat not in matches:
+            matches[vat] = str(vats_map[vat])
 
     run_id = f"dedupe-{uuid.uuid4().hex[:8]}"
     check_time = utc_now()
@@ -443,14 +472,28 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
     decisions: dict[str, dict[str, Any]] = {}
     is_comprehensive_scope = ("Accounts" in modules_queried and "Leads" in modules_queried and not bounded and not api_error)
 
-    for comp in args.companies:
-        matched_id = matches.get(comp)
+    candidates_to_eval: list[dict[str, Any]] = []
+    if getattr(args, "candidates", None):
+        candidates_to_eval = list(args.candidates)
+    elif args.companies:
+        for c in args.companies:
+            candidates_to_eval.append({"company": c})
+    elif args.vats:
+        for v in args.vats:
+            candidates_to_eval.append({"vat_number": v, "company": v})
+
+    for cand in candidates_to_eval:
+        comp = cand.get("company") or cand.get("candidate_key") or cand.get("vat_number") or ""
+        vat = cand.get("vat_number") or ""
+        dom = cand.get("domain") or ""
+
+        matched_id = matches.get(comp) or (matches.get(vat) if vat else None) or (matches.get(dom) if dom else None)
         if matched_id:
             dec_status = "DUPLICATE_CONFIRMED"
-            confidence = 1.0 if "vat_cache" in str(matched_id) else 0.95
+            confidence = 1.0 if ("vat" in str(matched_id) or "cache" in str(matched_id)) else 0.95
             q_status = "SUCCESS"
             err = None
-            matched_ids = [matched_id]
+            matched_ids = [str(matched_id)]
         elif api_error is not None:
             dec_status = "CHECK_FAILED"
             confidence = 0.0
@@ -476,7 +519,7 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             crm_organization="Minh Van Logistics",
             modules_checked=list(modules_queried),
             field_names_checked=["Account_Name", "Website", "VAT_Number"],
-            query_criteria={"company": comp},
+            query_criteria={"company": comp, "vat_number": vat, "domain": dom},
             query_status=q_status,
             matching_record_ids=matched_ids,
             match_confidence=confidence,
@@ -487,7 +530,10 @@ def crm_find_existing(args: FindExistingIn, rt: HubRuntime) -> dict[str, Any]:
             error_details=err,
             evidence_ref=f"zoho_dedupe_{run_id}_{uuid.uuid4().hex[:6]}"
         )
-        decisions[comp] = entity_decision.model_dump(mode="json")
+        dec_dump = entity_decision.model_dump(mode="json")
+        decisions[comp] = dec_dump
+        if vat and vat != comp:
+            decisions[vat] = dec_dump
 
     # Aggregate batch-level status purely as summary without contaminating per-entity status
     all_statuses = {d["decision_status"] for d in decisions.values()} if decisions else set()
@@ -542,11 +588,19 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
     import os
     import uuid
 
-    companies = [str(l.get("company") or "").strip() for l in args.leads if l.get("company")]
-    domains = [str(l.get("domain") or "").strip() for l in args.leads if l.get("domain")]
-    vats = [str(l.get("vat_number") or "").strip() for l in args.leads if l.get("vat_number")]
+    candidates = [
+        {
+            "company": str(l.get("company") or "").strip(),
+            "domain": str(l.get("domain") or "").strip(),
+            "vat_number": str(l.get("vat_number") or "").strip(),
+        }
+        for l in args.leads
+    ]
+    companies = [c["company"] for c in candidates if c["company"]]
+    domains = [c["domain"] for c in candidates if c["domain"]]
+    vats = [c["vat_number"] for c in candidates if c["vat_number"]]
 
-    dedupe_res = crm_find_existing(FindExistingIn(companies=companies, domains=domains, vats=vats), rt)
+    dedupe_res = crm_find_existing(FindExistingIn(companies=companies, domains=domains, vats=vats, candidates=candidates), rt)
     matches = dedupe_res.get("matches", {})
     decisions = dedupe_res.get("decisions", {})
     coverage = dedupe_res.get("coverage_status", "PARTIAL_COVERAGE")
@@ -562,26 +616,19 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
         dom = str(lead.get("domain") or "").strip()
         raw_vat = str(lead.get("vat_number") or "").strip()
 
-        # Trusted Dedupe Decision Resolver (V8-002: NEVER accept untrusted caller override)
-        lead_dedupe_dec = decisions.get(comp, {})
-        trusted_status = lead_dedupe_dec.get("decision_status")
         caller_status = lead.get("crm_dedupe_status")
 
-        # Caller can NEVER self-certify as clean/verified.
-        # Only authoritative internal decision from crm_find_existing can clear a record.
-        if caller_status in ("PARTIAL_COVERAGE", "CHECK_FAILED", "STALE_RESULT", "DUPLICATE_CONFIRMED"):
-            # Upstream failure/partial signals are honored conservatively
-            dedupe_status = caller_status if trusted_status in (None, "NOT_CHECKED", "NOT_FOUND_IN_CHECKED_SCOPE", "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE") else trusted_status
-        else:
-            dedupe_status = trusted_status or dedupe_res.get("match_status", "NOT_CHECKED")
+        # Trusted Dedupe Decision Resolver (V9-001: NEVER accept untrusted caller override to clean state)
+        lead_dedupe_dec = decisions.get(comp) or decisions.get(raw_vat) or {}
+        trusted_status = lead_dedupe_dec.get("decision_status")
 
-        # Check duplicate matches
+        # Check duplicate matches across all fields or negative/duplicate upstream attestation
         matched_id = matches.get(comp) or (matches.get(dom) if dom else None) or (matches.get(raw_vat) if raw_vat else None)
-        if matched_id or dedupe_status == "DUPLICATE_CONFIRMED":
+        if matched_id or trusted_status == "DUPLICATE_CONFIRMED" or caller_status == "DUPLICATE_CONFIRMED":
             excluded.append({
                 "company": comp,
-                "reason": f"Trùng tài khoản CRM: {matched_id or 'DUPLICATE_CONFIRMED'}",
-                "match_id": matched_id or "CONFIRMED",
+                "reason": f"Trùng tài khoản CRM: {matched_id or trusted_status or caller_status}",
+                "match_id": str(matched_id or "CONFIRMED"),
             })
             eligibility_decisions[comp] = {
                 "candidate_id": comp,
@@ -591,6 +638,13 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
                 "reason": "Phát hiện trùng lặp với dữ liệu Zoho CRM hiện có"
             }
             continue
+
+        # Fail-closed: Caller status is only honored if it reports failure or partial state.
+        # Caller CANNOT self-certify clean status without authoritative proof.
+        if caller_status in ("CHECK_FAILED", "STALE_RESULT", "PARTIAL_COVERAGE"):
+            dedupe_status = caller_status
+        else:
+            dedupe_status = trusted_status or dedupe_res.get("match_status", "NOT_CHECKED")
 
         vat_ok, vat_norm = validate_vietnam_vat(raw_vat) if raw_vat else (False, "")
 
@@ -628,31 +682,46 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
         dq_score = lead.get("data_quality_score", 0)
         cf_score = lead.get("commercial_fit_score", 0)
 
-        # Check if legal entity is verified through authoritative evidence (V8-003)
+        # Check if legal entity is verified through authoritative evidence (V9-002)
         # Format/checksum (vat_ok) alone is NOT legal entity verification!
+        # Caller cannot self-attest registry_verified without authoritative evidence.
         evidence_items = lead.get("evidence", [])
         has_authoritative_registry = False
+        authoritative_sources = {
+            "national_tax_portal",
+            "national_tax_registry_vietnam",
+            "vietnam_gdt_portal",
+            "dangkykinhdoanh.gov.vn",
+            "authoritative_api",
+        }
         for e in evidence_items:
             if not isinstance(e, dict):
                 continue
             ef = e.get("field_name")
             es = e.get("evidence_status") or e.get("status")
+            sp = str(e.get("source_provider") or e.get("verification_source") or "").lower()
             if ef in ("vat_number", "legal_name", "business_registration"):
                 if es in ("VERIFIED", "SOURCE_CORROBORATED"):
-                    has_authoritative_registry = True
-                    break
+                    if any(auth_src in sp for auth_src in authoritative_sources) or "corroborated" in str(es).lower():
+                        has_authoritative_registry = True
+                        break
 
-        legal_verified = vat_ok and (has_authoritative_registry or lead.get("registry_verified") is True)
+        legal_verified = vat_ok and has_authoritative_registry
 
-        # Determine strict eligibility and action (V7-003)
-        if dedupe_status in ("CHECK_FAILED", "STALE_RESULT"):
-            action = "REVIEW_REQUIRED_DEDUPE_ERROR"
-            action_reason = "Lỗi kết nối kiểm tra Zoho CRM; cần kiểm tra lại"
-            eligibility_status = "NEEDS_CRM_RECHECK"
-            eligible_for_crm_import = False
-        elif dedupe_status == "PARTIAL_COVERAGE" or (is_bounded and coverage == "PARTIAL_COVERAGE"):
-            action = "REVIEW_REQUIRED_DEDUPE_INCOMPLETE"
-            action_reason = "Zoho CRM scan was bounded (200 records); comprehensive dedupe incomplete"
+        # Strict Positive Fail-Closed Eligibility (V9-001)
+        clean_dedupe = (
+            dedupe_status in ("NOT_FOUND_VERIFIED", "NOT_FOUND_IN_CHECKED_SCOPE", "NOT_FOUND_IN_VERIFIED_SEARCH_SCOPE")
+            and coverage == "FULL_COVERAGE"
+            and not is_bounded
+        )
+
+        if not clean_dedupe:
+            if dedupe_status in ("CHECK_FAILED", "STALE_RESULT"):
+                action = "REVIEW_REQUIRED_DEDUPE_ERROR"
+                action_reason = "Lỗi kết nối kiểm tra Zoho CRM; cần kiểm tra lại"
+            else:
+                action = "REVIEW_REQUIRED_DEDUPE_INCOMPLETE"
+                action_reason = f"Chưa hoàn thành khử trùng lặp toàn diện (trạng thái: {dedupe_status}, độ phủ: {coverage})"
             eligibility_status = "NEEDS_CRM_RECHECK"
             eligible_for_crm_import = False
         elif missing_mandatory_fields:
@@ -662,12 +731,12 @@ def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, An
             eligible_for_crm_import = False
         elif not legal_verified or dq_score < 50:
             action = "NEEDS_VERIFICATION"
-            action_reason = "Chưa xác minh pháp nhân hoặc điểm chất lượng dữ liệu dưới 50"
+            action_reason = "Chưa xác minh pháp nhân qua bằng chứng cơ quan thuế thẩm quyền hoặc điểm chất lượng dữ liệu dưới 50"
             eligibility_status = "NEEDS_IDENTITY_VERIFICATION"
             eligible_for_crm_import = False
         else:
             action = "STAGED_FOR_INSERT"
-            action_reason = "Hồ sơ đủ điều kiện nhập CRM: pháp nhân đã xác minh, không trùng CRM, thông tin liên hệ đầy đủ"
+            action_reason = "Hồ sơ đủ điều kiện nhập CRM: pháp nhân đã xác minh bằng chứng, không trùng CRM, thông tin liên hệ đầy đủ"
             eligibility_status = "APPROVED_FOR_STAGING"
             eligible_for_crm_import = True
 
@@ -935,8 +1004,28 @@ def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]
                     }
                 )
 
+                events_to_persist = [ev_discovered, ev_dedupe]
+                if getattr(cand, "legal_verified", False) or getattr(cand, "identity_verified", False) or getattr(cand, "registry_verified", False):
+                    ev_verified = BusinessEvent(
+                        event_type="lead.identity_verified",
+                        entity_id=stable_id,
+                        workflow_id=getattr(rt.ctx, "workflow_id", "") or rt.ctx.correlation_id,
+                        environment=cand.environment,
+                        synthetic=cand.synthetic,
+                        source="national_tax_registry",
+                        correlation_id=rt.ctx.correlation_id,
+                        evidence_ref=c_dec.get("evidence_ref"),
+                        payload_json={
+                            "company": cand.company,
+                            "vat_number": cand.vat_number,
+                            "legal_verified": True,
+                            "outcome": "SUCCESS",
+                        }
+                    )
+                    events_to_persist.append(ev_verified)
+
                 # Atomic persistence of canonical entity and all business events (V8-005)
-                storage.persist_lead_with_events(lead_entity, [ev_discovered, ev_dedupe])
+                storage.persist_lead_with_events(lead_entity, events_to_persist)
         except Exception as store_err:
             logger.error("Failed to store canonical lead entity: %s", store_err)
             raise store_err

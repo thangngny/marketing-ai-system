@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from ..models import LeadCandidate
-from .approvals import payload_hash
+from .approvals import ApprovalRecord, payload_hash
 from .engine import StepContext, StepOutcome, WorkflowDefinition, WorkflowStep
 
 _BLOCKING = {"NEEDS_AUTH", "NEEDS_MFA", "NEEDS_API_ACCESS", "NOT_CONFIGURED", "NOT_IMPLEMENTED", "DENIED", "ERROR", "INVALID_INPUT"}
@@ -348,11 +348,68 @@ def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
     engine = getattr(ctx, "engine", None)
     if engine and hasattr(engine, "approvals") and approval_id:
         rec = engine.approvals.get(approval_id)
-        if rec and rec.status == "APPROVED" and rec.payload_hash == digest and not rec.expired():
-            approved_records = eligible
-    elif engine is None:
-        # Standalone step invocation (e.g. unit tests without engine harness)
-        approved_records = eligible
+        if rec:
+            if isinstance(rec, ApprovalRecord):
+                auth_ok = rec.authorizes("workflow.stage_leads_for_crm", digest)
+            else:
+                auth_ok = (
+                    getattr(rec, "status", None) == "APPROVED"
+                    and not (getattr(rec, "expired", lambda: False)())
+                    and getattr(rec, "payload_hash", None) == digest
+                    and not (isinstance(getattr(rec, "consumed_at", None), str) and bool(getattr(rec, "consumed_at", None)))
+                )
+
+            if auth_ok:
+                if hasattr(engine.approvals, "consume") and callable(engine.approvals.consume):
+                    consumed = engine.approvals.consume(approval_id)
+                else:
+                    consumed = True
+                if consumed:
+                    approved_records = eligible
+    elif engine is None and approval_id:
+        # Standalone step invocation: strictly require valid approval record passed in context
+        mock_rec = getattr(ctx, "approval_record", None)
+        if mock_rec:
+            if isinstance(mock_rec, ApprovalRecord):
+                auth_ok = mock_rec.authorizes("workflow.stage_leads_for_crm", digest)
+            else:
+                auth_ok = (
+                    getattr(mock_rec, "status", None) == "APPROVED"
+                    and not (getattr(mock_rec, "expired", lambda: False)())
+                    and getattr(mock_rec, "payload_hash", None) == digest
+                    and not (isinstance(getattr(mock_rec, "consumed_at", None), str) and bool(getattr(mock_rec, "consumed_at", None)))
+                )
+            if auth_ok:
+                approved_records = eligible
+
+    # Record lead.crm_staged business events for approved records
+    if approved_records and engine and hasattr(engine, "settings"):
+        try:
+            from ..storage import StagingStore
+            from ..models import BusinessEvent
+            store = StagingStore(engine.settings.data_dir / "marketing.db")
+            for rec in approved_records:
+                comp = rec.get("company", "")
+                p_hash = rec.get("payload_hash", "")
+                ev = BusinessEvent(
+                    event_type="lead.crm_staged",
+                    entity_id=comp,
+                    workflow_id=getattr(ctx, "workflow", {}).get("workflow_id", "") or "wf-staging",
+                    environment=engine.settings.environment,
+                    synthetic=(engine.settings.environment.value == "mock"),
+                    source="gtm_pipeline_approval",
+                    correlation_id=getattr(ctx, "workflow", {}).get("correlation_id", "") or "corr-staging",
+                    payload_json={
+                        "company": comp,
+                        "action": "STAGED_FOR_INSERT",
+                        "payload_hash": p_hash,
+                        "approval_id": approval_id,
+                        "outcome": "SUCCESS",
+                    }
+                )
+                store.record_event(ev)
+        except Exception:
+            pass
 
     stage_status = "APPROVED_FOR_CRM" if approved_records else "NO_APPROVED_LEADS_STAGED"
 

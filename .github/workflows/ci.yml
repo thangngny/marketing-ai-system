@@ -64,7 +64,7 @@ jobs:
         run: |
           python -m pytest -v tests/
 
-      - name: Verify 12 Production Invariants & Defect Remediations
+      - name: Verify 12 Production Invariants & V4-V9 Defect Remediations
         env:
           ENVIRONMENT: production
           SAFE_DRY_RUN: 'true'
@@ -73,4 +73,21 @@ jobs:
           BUZZ_BUZZ_AI_USAGE_CENTER_DIR: ${{ github.workspace }}/buzz-ai-usage-center
           BUZZ_BUZZ_MARKETING_OS_ENTERPRISE_SUITE_DIR: ${{ github.workspace }}/Buzz-Marketing-OS-Enterprise-Suite
         run: |
-          python -m pytest -v tests/test_v4_production_invariants.py tests/test_v4_reproduce_defects.py
+          python -m pytest -v tests/test_v4_production_invariants.py tests/test_v4_reproduce_defects.py tests/test_v8_defect_reproduction.py tests/test_v8_remediation_and_adversarial_suite.py tests/test_v9_remediation_and_adversarial_suite.py
+
+      - name: Verify Cross-Repository Behavioral Test Suites
+        env:
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+        run: |
+          python -m pytest -v Buzz-Marketing-OS-Enterprise-Suite/test_e2e_full.py Buzz-Marketing-OS-Enterprise-Suite/03-Marketing-Hub/test_hub.py
+          python -m pytest -v buzz-ai-usage-center/tests/
+
+      - name: Execute End-to-End Behavioral Demonstration Pipeline
+        env:
+          SAFE_DRY_RUN: 'true'
+          CRM_WRITE_ENABLED: 'false'
+          OUTREACH_ENABLED: 'false'
+        run: |
+          python scripts/e2e_gtm_demonstration.py

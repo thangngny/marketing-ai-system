@@ -20,16 +20,19 @@ class StagingStore:
 
     def connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         # Enable WAL mode for high concurrency read/write safety
         connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA busy_timeout=5000")
+        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute("PRAGMA synchronous=NORMAL")
         return connection
 
     def initialize(self) -> None:
-        with self.connect() as connection:
-            connection.execute(
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS canonical_records (
                     id TEXT NOT NULL,
@@ -45,10 +48,10 @@ class StagingStore:
                 )
                 """
             )
-            connection.execute(
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_records_correlation ON canonical_records(correlation_id)"
             )
-            connection.execute(
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS business_events (
                     event_id TEXT PRIMARY KEY,
@@ -66,54 +69,89 @@ class StagingStore:
                 )
                 """
             )
-            connection.execute(
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_entity ON business_events(entity_id)"
             )
-            connection.execute(
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_workflow ON business_events(workflow_id)"
             )
-            connection.execute(
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_type ON business_events(event_type)"
             )
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            conn.close()
 
     def record_event(self, event: BusinessEvent) -> None:
         if event.environment is not Environment.MOCK and event.synthetic:
             raise ValueError("Synthetic business events may only be recorded in the mock environment")
         self.initialize()
         payload = event.model_dump(mode="json")
-        with self.connect() as connection:
-            existing = connection.execute(
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
                 "SELECT payload_json FROM business_events WHERE event_id = ?", (event.event_id,)
             ).fetchone()
             if existing:
                 existing_payload = json.loads(existing["payload_json"])
                 if existing_payload == event.payload_json:
+                    conn.execute("ROLLBACK")
                     return  # Idempotent re-recording
+                conn.execute("ROLLBACK")
                 raise EventConflictError(
                     f"Business event '{event.event_id}' already exists with different payload. Events are immutable."
                 )
-            connection.execute(
-                """
-                INSERT INTO business_events
-                    (event_id, event_type, entity_id, workflow_id, environment, synthetic,
-                     source, occurred_at, correlation_id, evidence_ref, policy_version, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event.event_id,
-                    event.event_type,
-                    event.entity_id,
-                    event.workflow_id,
-                    event.environment.value,
-                    int(event.synthetic),
-                    event.source,
-                    str(payload["occurred_at"]),
-                    event.correlation_id,
-                    event.evidence_ref,
-                    event.policy_version,
-                    json.dumps(event.payload_json, ensure_ascii=False),
-                ),
-            )
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO business_events
+                        (event_id, event_type, entity_id, workflow_id, environment, synthetic,
+                         source, occurred_at, correlation_id, evidence_ref, policy_version, payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.event_id,
+                        event.event_type,
+                        event.entity_id,
+                        event.workflow_id,
+                        event.environment.value,
+                        int(event.synthetic),
+                        event.source,
+                        str(payload["occurred_at"]),
+                        event.correlation_id,
+                        event.evidence_ref,
+                        event.policy_version,
+                        json.dumps(event.payload_json, ensure_ascii=False),
+                    ),
+                )
+                conn.execute("COMMIT")
+            except sqlite3.IntegrityError:
+                conn.execute("ROLLBACK")
+                existing = conn.execute(
+                    "SELECT payload_json FROM business_events WHERE event_id = ?", (event.event_id,)
+                ).fetchone()
+                if existing and json.loads(existing["payload_json"]) == event.payload_json:
+                    return
+                raise EventConflictError(
+                    f"Business event '{event.event_id}' already exists with different payload. Events are immutable."
+                )
+        except Exception:
+            if conn.in_transaction:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            conn.close()
 
     def persist_lead_with_events(self, entity: BaseEntity, events: list[BusinessEvent]) -> None:
         """
@@ -124,14 +162,16 @@ class StagingStore:
             raise ValueError("Synthetic records may only be stored in the mock environment")
         self.initialize()
         payload = entity.model_dump(mode="json")
-        with self.connect() as connection:
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
             # 1. Upsert canonical entity
-            existing = connection.execute(
+            existing = conn.execute(
                 "SELECT environment FROM canonical_records WHERE id = ?", (entity.id,)
             ).fetchall()
             if existing and any(row["environment"] != entity.environment.value for row in existing):
                 raise ValueError("Cross-environment record update refused")
-            connection.execute(
+            conn.execute(
                 """
                 INSERT INTO canonical_records
                     (id, entity_type, environment, source, correlation_id, synthetic,
@@ -162,7 +202,7 @@ class StagingStore:
                 if event.environment is not Environment.MOCK and event.synthetic:
                     raise ValueError("Synthetic business events may only be recorded in the mock environment")
                 ev_payload = event.model_dump(mode="json")
-                existing_ev = connection.execute(
+                existing_ev = conn.execute(
                     "SELECT payload_json FROM business_events WHERE event_id = ?", (event.event_id,)
                 ).fetchone()
                 if existing_ev:
@@ -172,28 +212,48 @@ class StagingStore:
                     raise EventConflictError(
                         f"Business event '{event.event_id}' already exists with different payload. Events are immutable."
                     )
-                connection.execute(
-                    """
-                    INSERT INTO business_events
-                        (event_id, event_type, entity_id, workflow_id, environment, synthetic,
-                         source, occurred_at, correlation_id, evidence_ref, policy_version, payload_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event.event_id,
-                        event.event_type,
-                        event.entity_id,
-                        event.workflow_id,
-                        event.environment.value,
-                        int(event.synthetic),
-                        event.source,
-                        str(ev_payload["occurred_at"]),
-                        event.correlation_id,
-                        event.evidence_ref,
-                        event.policy_version,
-                        json.dumps(event.payload_json, ensure_ascii=False),
-                    ),
-                )
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO business_events
+                            (event_id, event_type, entity_id, workflow_id, environment, synthetic,
+                             source, occurred_at, correlation_id, evidence_ref, policy_version, payload_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event.event_id,
+                            event.event_type,
+                            event.entity_id,
+                            event.workflow_id,
+                            event.environment.value,
+                            int(event.synthetic),
+                            event.source,
+                            str(ev_payload["occurred_at"]),
+                            event.correlation_id,
+                            event.evidence_ref,
+                            event.policy_version,
+                            json.dumps(event.payload_json, ensure_ascii=False),
+                        ),
+                    )
+                except sqlite3.IntegrityError:
+                    recheck = conn.execute(
+                        "SELECT payload_json FROM business_events WHERE event_id = ?", (event.event_id,)
+                    ).fetchone()
+                    if recheck and json.loads(recheck["payload_json"]) == event.payload_json:
+                        continue
+                    raise EventConflictError(
+                        f"Business event '{event.event_id}' already exists with different payload. Events are immutable."
+                    )
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            conn.close()
 
     def list_events(
         self,
@@ -216,27 +276,32 @@ class StagingStore:
             params.append(entity_id)
         sql += " ORDER BY occurred_at DESC LIMIT ?"
         params.append(limit)
-        with self.connect() as connection:
-            rows = connection.execute(sql, params).fetchall()
+        conn = self.connect()
+        try:
+            rows = conn.execute(sql, params).fetchall()
             results = []
             for r in rows:
                 d = dict(r)
                 d["payload"] = json.loads(d["payload_json"])
                 results.append(d)
             return results
+        finally:
+            conn.close()
 
     def upsert(self, entity: BaseEntity) -> None:
         if entity.environment is not Environment.MOCK and entity.synthetic:
             raise ValueError("Synthetic records may only be stored in the mock environment")
         self.initialize()
         payload = entity.model_dump(mode="json")
-        with self.connect() as connection:
-            existing = connection.execute(
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
                 "SELECT environment FROM canonical_records WHERE id = ?", (entity.id,)
             ).fetchall()
             if existing and any(row["environment"] != entity.environment.value for row in existing):
                 raise ValueError("Cross-environment record update refused")
-            connection.execute(
+            conn.execute(
                 """
                 INSERT INTO canonical_records
                     (id, entity_type, environment, source, correlation_id, synthetic,
@@ -261,6 +326,16 @@ class StagingStore:
                     str(payload["updated_at"]),
                 ),
             )
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            conn.close()
 
     def list_records(
         self, environment: Environment, entity_type: str | None = None, limit: int = 100
@@ -273,11 +348,12 @@ class StagingStore:
             params.append(entity_type)
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(limit)
-        with self.connect() as connection:
-            return [json.loads(row["payload_json"]) for row in connection.execute(sql, params)]
+        conn = self.connect()
+        try:
+            return [json.loads(row["payload_json"]) for row in conn.execute(sql, params)]
+        finally:
+            conn.close()
 
 
 # Alias for backward compatibility across modules
 Storage = StagingStore
-
-
