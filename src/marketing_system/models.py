@@ -135,6 +135,26 @@ CanonicalEntity = (
 )
 
 
+class EvidenceStatus(str):
+    VERIFIED = "VERIFIED"
+    INFERRED = "INFERRED"
+    LEGACY_IMPORT = "LEGACY_IMPORT"
+    REJECTED = "REJECTED"
+
+
+class EvidenceItem(BaseModel):
+    field_name: str
+    field_value: Any
+    source_url: str | None = None
+    source_provider: str
+    observed_at: datetime = Field(default_factory=utc_now)
+    verified_at: datetime | None = None
+    verification_method: str = "direct_api"
+    evidence_status: Literal["VERIFIED", "INFERRED", "LEGACY_IMPORT", "REJECTED"] = "INFERRED"
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    raw_evidence: str | None = None
+
+
 class LeadCandidate(BaseModel):
     """Prospect after dedupe/scoring; crosses the Account Intelligence → Sales Copilot boundary."""
 
@@ -143,15 +163,73 @@ class LeadCandidate(BaseModel):
     contact_name: str | None = None
     title: str | None = None
     email: str | None = None
+    phone: str | None = None
+    vat_number: str | None = None
+    legal_name: str | None = None
+    registered_address: str | None = None
+    industry_code: str | None = None
     source: str
     environment: Environment
     synthetic: bool = False
     in_crm: bool = False
     crm_match: str | None = None
     score: int = Field(default=0, ge=0, le=100)
+    data_quality_score: int = Field(default=0, ge=0, le=100)
+    commercial_fit_score: int = Field(default=0, ge=0, le=100)
     score_breakdown: dict[str, int] = Field(default_factory=dict)
     score_reason: str = ""
     source_reference: str | None = None
+    stage: Literal[
+        "NEW",
+        "DISCOVERING",
+        "VERIFYING",
+        "DEDUPING",
+        "SCORING",
+        "READY_FOR_REVIEW",
+        "APPROVED_FOR_CRM",
+        "REJECTED",
+    ] = "NEW"
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+
+    def add_evidence(
+        self,
+        field_name: str,
+        field_value: Any,
+        source_provider: str,
+        evidence_status: Literal["VERIFIED", "INFERRED", "LEGACY_IMPORT", "REJECTED"] = "INFERRED",
+        source_url: str | None = None,
+        verification_method: str = "direct_api",
+        confidence: float = 1.0,
+        raw_evidence: str | None = None,
+    ) -> EvidenceItem:
+        item = EvidenceItem(
+            field_name=field_name,
+            field_value=field_value,
+            source_url=source_url,
+            source_provider=source_provider,
+            observed_at=utc_now(),
+            verified_at=utc_now() if evidence_status == "VERIFIED" else None,
+            verification_method=verification_method,
+            evidence_status=evidence_status,
+            confidence=confidence,
+            raw_evidence=raw_evidence,
+        )
+        self.evidence.append(item)
+        return item
+
+    def get_verified_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == "VERIFIED"
+        }
+
+    def get_inferred_fields(self) -> dict[str, Any]:
+        return {
+            e.field_name: e.field_value
+            for e in self.evidence
+            if e.evidence_status == "INFERRED"
+        }
 
 
 class EmailDraft(BaseModel):

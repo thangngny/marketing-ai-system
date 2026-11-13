@@ -265,6 +265,76 @@ VIDEO_PRODUCTION = WorkflowDefinition(
     finalize=finalize_video,
 )
 
+# ---------------------------------------------------------------- GTM Enterprise Lead Pipeline
+def step_gtm_discover(ctx: StepContext) -> StepOutcome:
+    p = ctx.params
+    limit = int(p.get("limit", 10))
+    keywords = p.get("keywords") or ["medical", "thiết bị y tế", "dược phẩm", "linh kiện điện tử"]
+    result = ctx.tool("prospecting.pipeline_run", {
+        "industry_keywords": keywords,
+        "limit": limit
+    }, specialist="03_account_intelligence")
+    blocked = _tool_outcome(result)
+    if blocked:
+        return blocked
+    candidates = (result.data or {}).get("candidates", [])
+    return StepOutcome(status="done", output={"discovered": candidates, "total": len(candidates)})
+
+
+def step_gtm_crm_preview(ctx: StepContext) -> StepOutcome:
+    candidates = ctx.outputs["discover"]["discovered"]
+    result = ctx.tool("crm.preview_import", {"leads": candidates}, specialist="06_sales_copilot")
+    blocked = _tool_outcome(result)
+    if blocked:
+        return blocked
+    return StepOutcome(status="done", output=result.data)
+
+
+def step_gtm_gate(ctx: StepContext) -> StepOutcome:
+    preview = ctx.outputs["crm_preview"]
+    staged = preview.get("staged_records", [])
+    summary = (
+        f"Phê duyệt đưa {len(staged)} khách hàng tiềm năng đã xác thực & chấm điểm vào Zoho CRM "
+        f"(Dữ liệu an toàn, Write-mode: {preview.get('write_enabled')}). "
+        f"Doanh nghiệp hàng đầu: " + ", ".join(s["company"] for s in staged[:3])
+    )
+    return ctx.gate("workflow.stage_leads_for_crm", staged, summary)
+
+
+def step_gtm_finalize_stage(ctx: StepContext) -> StepOutcome:
+    staged = ctx.outputs["crm_preview"].get("staged_records", [])
+    return StepOutcome(status="done", output={
+        "approved_count": len(staged),
+        "stage_status": "APPROVED_FOR_CRM",
+        "staged_records": staged,
+        "crm_write_executed": False,
+        "mode": "SAFE_CONTROLLED_STAGING"
+    })
+
+
+def finalize_gtm_lead_pipeline(wf: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "workflow_id": wf.get("workflow_id"),
+        "total_discovered": out.get("discover", {}).get("total", 0),
+        "crm_preview": out.get("crm_preview", {}),
+        "final_staging": out.get("finalize_stage", {}),
+        "status": "COMPLETED"
+    }
+
+
+GTM_LEAD_PIPELINE = WorkflowDefinition(
+    workflow_type="gtm_lead_pipeline",
+    description="Enterprise GTM Lead Pipeline: Discovery → Verification (VAT/MX) → Dedupe → Two-Axis Scoring → Zoho CRM Safe Preview → Human Approval Gate → Staging.",
+    steps=[
+        WorkflowStep("discover", "03_account_intelligence", step_gtm_discover),
+        WorkflowStep("crm_preview", "06_sales_copilot", step_gtm_crm_preview),
+        WorkflowStep("approval_gate", "06_sales_copilot", step_gtm_gate),
+        WorkflowStep("finalize_stage", "06_sales_copilot", step_gtm_finalize_stage),
+    ],
+    finalize=finalize_gtm_lead_pipeline,
+)
+
+
 DEFINITIONS: dict[str, WorkflowDefinition] = {
-    d.workflow_type: d for d in (PROSPECT_TO_DRAFT, TOOL_APPROVAL, VIDEO_PRODUCTION)
+    d.workflow_type: d for d in (PROSPECT_TO_DRAFT, TOOL_APPROVAL, VIDEO_PRODUCTION, GTM_LEAD_PIPELINE)
 }

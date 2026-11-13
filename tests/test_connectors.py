@@ -11,7 +11,7 @@ def test_every_connector_is_mock_ready_without_credentials(monkeypatch, tmp_path
             monkeypatch.delenv(name, raising=False)
     settings = Settings(environment=Environment.MOCK, data_dir=tmp_path, log_dir=tmp_path)
     reports = ConnectorRegistry(settings).reports()
-    assert len(reports) == 13
+    assert len(reports) == 14
     assert all(report.current_state == ConnectorState.MOCK_READY for report in reports)
     assert all(report.live_state in {ConnectorState.NEEDS_AUTH, ConnectorState.NEEDS_ACCESS, ConnectorState.CONFIG_REQUIRED} for report in reports)
     assert all(report.live_tested is False for report in reports)

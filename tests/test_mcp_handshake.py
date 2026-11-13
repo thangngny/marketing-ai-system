@@ -1,5 +1,9 @@
 import subprocess, json, sys
+import pytest
 
+@pytest.mark.parametrize("name, script_path, expected_count", [
+    ("x-context-intelligence", r"C:\Users\Admin\marketing-ai-system\x-context-intelligence\mcp\server.py", 10)
+])
 def test_mcp(name, script_path, expected_count):
     p = subprocess.Popen(
         [sys.executable, script_path],

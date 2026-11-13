@@ -37,7 +37,7 @@ DEFAULT_HIGH_IMPACT_ENABLED = frozenset({
 
 
 class PolicyEngine:
-    def __init__(self, high_impact_enabled: frozenset[str] = DEFAULT_HIGH_IMPACT_ENABLED, full_autonomy: bool = True):
+    def __init__(self, high_impact_enabled: frozenset[str] = DEFAULT_HIGH_IMPACT_ENABLED, full_autonomy: bool = False):
         self.high_impact_enabled = high_impact_enabled
         self.full_autonomy = full_autonomy
 

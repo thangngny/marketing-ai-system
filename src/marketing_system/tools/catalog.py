@@ -58,6 +58,17 @@ class DeleteRecordIn(BaseModel):
     record_id: str
 
 
+class PreviewCrmImportIn(BaseModel):
+    leads: list[dict[str, Any]] = Field(default_factory=list, description="Danh sách ứng viên lead cần preview trước khi import.")
+
+
+class LeadPipelineRunIn(BaseModel):
+    industry_keywords: list[str] = Field(default_factory=lambda: ["medical", "thiết bị y tế", "dược phẩm", "linh kiện điện tử"])
+    industry_codes: list[str] = Field(default_factory=lambda: ["3250", "2611", "4651", "4659"])
+    trade_lanes: list[str] = Field(default_factory=lambda: ["JP-VN", "KR-VN", "CN-VN", "EU-VN"])
+    limit: int = Field(10, ge=1, le=50)
+
+
 class SearchCompaniesIn(BaseModel):
     industry: str = "logistics"
     keywords: list[str] = Field(default_factory=list)
@@ -318,6 +329,104 @@ def crm_create_task(args: TaskIn, rt: HubRuntime) -> dict[str, Any]:
 
 def crm_delete_record(args: DeleteRecordIn, rt: HubRuntime) -> dict[str, Any]:
     raise NotImplementedError("CRM deletion is never automated.")
+
+
+def crm_preview_import(args: PreviewCrmImportIn, rt: HubRuntime) -> dict[str, Any]:
+    from ..lead_engine.verifier import validate_vietnam_vat
+    import os
+
+    companies = [l.get("company", "") for l in args.leads if l.get("company")]
+    domains = [l.get("domain", "") for l in args.leads if l.get("domain")]
+
+    dedupe_res = crm_find_existing(FindExistingIn(companies=companies, domains=domains), rt)
+    matches = dedupe_res.get("matches", {})
+
+    staged = []
+    excluded = []
+
+    for lead in args.leads:
+        comp = lead.get("company", "")
+        dom = lead.get("domain", "")
+        vat = lead.get("vat_number", "")
+
+        if comp in matches or (dom and dom in matches):
+            excluded.append({
+                "company": comp,
+                "reason": f"Trùng tài khoản CRM: {matches.get(comp) or matches.get(dom)}"
+            })
+            continue
+
+        vat_ok, vat_norm = validate_vietnam_vat(vat)
+
+        zoho_payload = {
+            "Company": comp,
+            "Last_Name": lead.get("contact_name") or comp,
+            "Designation": lead.get("title") or "Người liên hệ mua hàng",
+            "Email": lead.get("email") or "",
+            "Phone": lead.get("phone") or "",
+            "VAT_Number": vat_norm if vat_ok else vat,
+            "Lead_Source": "GTM_AI_Discovery",
+            "Industry": lead.get("industry_code") or "Logistics",
+            "Description": (
+                f"[GTM AI Stage] Điểm phù hợp: {lead.get('score', 0)}/100 ({lead.get('score_reason', '')}). "
+                f"Chất lượng dữ liệu: {lead.get('data_quality_score', 0)}/100. "
+                f"Độ khớp thương mại: {lead.get('commercial_fit_score', 0)}/100."
+            ),
+            "Lead_Status": "Chưa liên hệ / Chờ Sales duyệt"
+        }
+        staged.append({
+            "company": comp,
+            "zoho_module": "Leads",
+            "action": "INSERT",
+            "payload": zoho_payload,
+            "data_quality_score": lead.get("data_quality_score", 0),
+            "commercial_fit_score": lead.get("commercial_fit_score", 0),
+            "evidence_count": len(lead.get("evidence", [])),
+        })
+
+    write_enabled = os.environ.get("CRM_WRITE_ENABLED", "false").lower() in ("true", "1")
+
+    return _artifact(rt, "crm-import-preview", f"batch-{len(staged)}", {
+        "total_input": len(args.leads),
+        "staged_count": len(staged),
+        "excluded_count": len(excluded),
+        "write_enabled": write_enabled,
+        "mode": "SAFE_PREVIEW_ONLY",
+        "staged_records": staged,
+        "excluded_records": excluded,
+    })
+
+
+def lead_pipeline_run(args: LeadPipelineRunIn, rt: HubRuntime) -> dict[str, Any]:
+    from ..lead_engine.discovery import DynamicDiscoveryEngine, DiscoveryFilter
+    from ..lead_engine.verifier import LeadVerifier
+    from ..lead_engine.scorer import TwoAxisScorer
+
+    filt = DiscoveryFilter(
+        industry_keywords=args.industry_keywords,
+        industry_codes=args.industry_codes,
+        trade_lanes=args.trade_lanes,
+        limit=args.limit
+    )
+
+    discovery = DynamicDiscoveryEngine()
+    disc_res = discovery.discover_candidates(filt, env=rt.settings.environment)
+
+    verifier = LeadVerifier()
+    scorer = TwoAxisScorer()
+
+    verified_candidates = []
+    for cand in disc_res.candidates:
+        verifier.verify_candidate(cand)
+        scorer.score_candidate(cand)
+        verified_candidates.append(cand.model_dump(mode="json"))
+
+    return _artifact(rt, "pipeline-discovery", f"run-{len(verified_candidates)}", {
+        "total_discovered": len(verified_candidates),
+        "candidates": verified_candidates,
+        "sources": disc_res.sources_used,
+        "filter": filt.model_dump(),
+    })
 
 
 def prospecting_search_companies(args: SearchCompaniesIn, rt: HubRuntime) -> list[dict[str, Any]]:
@@ -828,6 +937,10 @@ def _spec(name, impact, connector, capability, model, description, summarize=Non
 CATALOG: list[tuple[ToolSpec, Any]] = [
     (_spec("system.connector_status", Impact.READ, "system", "status", StatusIn,
            "Per-capability state (AUTH/READ/ANALYTICS/DRAFT/PUBLISH) for every connector."), system_status),
+    (_spec("crm.preview_import", Impact.DRAFT, "zoho", "read_crm_records", PreviewCrmImportIn,
+           "Generate safe Zoho CRM import preview and deduplication diff without modifying CRM."), crm_preview_import),
+    (_spec("prospecting.pipeline_run", Impact.DRAFT, "apollo", "organization_search", LeadPipelineRunIn,
+           "Run dynamic multi-source discovery, evidence verification, and two-axis commercial scoring."), lead_pipeline_run),
     (_spec("crm.search_leads", Impact.READ, "zoho", "read_crm_records", LimitIn, "List Zoho CRM leads."), _crm_list("leads")),
     (_spec("crm.list_contacts", Impact.READ, "zoho", "read_crm_records", LimitIn, "List Zoho CRM contacts."), _crm_list("contacts")),
     (_spec("crm.list_accounts", Impact.READ, "zoho", "read_crm_records", LimitIn, "List Zoho CRM accounts."), _crm_list("accounts")),

@@ -44,7 +44,8 @@ class MetaAdsConnector(BaseConnector):
                 timeout=15.0,
             )
             if response.is_success:
-                account_name = response.json().get("name", f"act_{account}")
+                data = response.json() if hasattr(response, "json") and callable(getattr(response, "json")) else {}
+                account_name = data.get("name", f"act_{account}")
                 return True, f"Meta ad-account probe succeeded for '{account_name}' (via {token_key})."
         return False, "Meta ad-account read probe failed (all tokens expired or unauthorized)."
 

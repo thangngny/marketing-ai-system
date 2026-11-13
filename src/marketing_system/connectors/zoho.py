@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..constants import Impact
+from ..crypto import load_secure_json, save_secure_json
 from ..normalization import normalize_zoho_record
 from .base import BaseConnector, Capability
 
@@ -73,11 +74,11 @@ class ZohoConnector(BaseConnector):
         if self._cached_access_context:
             return self._cached_access_context
 
-        # Check persistent on-disk token cache first
+        # Check persistent secure on-disk token cache first
         cache_path = Path(r"C:\Users\Admin\.buzz\.scratch\zoho_token_cache.json")
         try:
-            if cache_path.exists():
-                cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+            cache_data = load_secure_json(cache_path)
+            if cache_data:
                 tok = cache_data.get("access_token")
                 dom = cache_data.get("api_domain")
                 exp = cache_data.get("expires_at", 0)
@@ -102,8 +103,8 @@ class ZohoConnector(BaseConnector):
         if token.status_code == 400 and "too many requests" in token.text.lower():
             # If rate-limited, attempt to use existing cached token even if close to expiry
             try:
-                if cache_path.exists():
-                    cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+                cache_data = load_secure_json(cache_path)
+                if cache_data:
                     tok = cache_data.get("access_token")
                     dom = cache_data.get("api_domain")
                     if tok and dom:
@@ -119,15 +120,14 @@ class ZohoConnector(BaseConnector):
         if not access_token:
             raise RuntimeError("Token exchange returned no access token")
 
-        # Persist cache to disk
+        # Persist secure encrypted cache to disk
         try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps({
+            save_secure_json(cache_path, {
                 "access_token": str(access_token),
                 "api_domain": str(api_domain),
                 "expires_at": time.time() + float(expires_in),
                 "saved_at": time.time(),
-            }, indent=2), encoding="utf-8")
+            }, description="ZohoOAuthTokenCache")
         except Exception:
             pass
 
