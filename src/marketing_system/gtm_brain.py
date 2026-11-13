@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-BRAIN_DIR = Path(r"C:\Users\Admin\marketing-ai-system\gtm-brain")
+BRAIN_DIR = Path(__file__).resolve().parent.parent.parent / "gtm-brain"
+if not BRAIN_DIR.exists():
+    BRAIN_DIR = Path(os.environ.get("GTM_BRAIN_DIR", str(Path.home() / "marketing-ai-system" / "gtm-brain")))
 
 
 class BrainSnippet(BaseModel):
