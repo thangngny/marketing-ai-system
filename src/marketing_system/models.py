@@ -187,6 +187,7 @@ class LeadCandidate(BaseModel):
     crm_dedupe_status: Literal[
         "NOT_CHECKED",
         "CHECK_FAILED",
+        "PARTIAL_COVERAGE",
         "POSSIBLE_DUPLICATE",
         "DUPLICATE_CONFIRMED",
         "NOT_FOUND_VERIFIED",

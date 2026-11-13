@@ -75,34 +75,75 @@ class ApolloDiscoveryProvider(BaseDiscoveryProvider):
         # 1. Live Connector Query Path
         if self.connector and hasattr(self.connector, "configured") and self.connector.configured():
             try:
-                query = " ".join(filter_spec.industry_keywords[:2])
-                results = self.connector.search_people(q_keywords=query, per_page=filter_spec.limit)
-                for item in (results or []):
-                    org = item.get("organization", {})
-                    company_name = org.get("name") or item.get("company_name", "")
-                    if not company_name:
-                        continue
-                    c = LeadCandidate(
-                        company=company_name,
-                        domain=org.get("primary_domain") or item.get("domain"),
-                        contact_name=item.get("name") or f"{item.get('first_name', '')} {item.get('last_name', '')}".strip(),
-                        title=item.get("title"),
-                        email=item.get("email"),
-                        phone=item.get("phone_number") or org.get("phone"),
-                        source="apollo",
-                        environment=env,
-                        synthetic=False,
-                        stage="DISCOVERING"
+                locations = [filter_spec.location] if filter_spec.location else ["Vietnam"]
+                # 1. Organization Discovery
+                if hasattr(self.connector, "search_companies"):
+                    comp_results = self.connector.search_companies(
+                        keywords=filter_spec.industry_keywords,
+                        locations=locations,
+                        per_page=filter_spec.limit
                     )
-                    # Raw observation from Apollo is SOURCE_OBSERVED, NOT verified
-                    c.add_evidence(
-                        field_name="company_profile",
-                        field_value={"name": company_name, "domain": c.domain},
-                        source_provider="apollo",
-                        evidence_status=EvidenceStatus.SOURCE_OBSERVED,
-                        confidence=0.80
+                    for org in (comp_results or []):
+                        company_name = org.get("name")
+                        if not company_name:
+                            continue
+                        c = LeadCandidate(
+                            company=company_name,
+                            domain=org.get("primary_domain") or org.get("website_url"),
+                            contact_name=None,
+                            title=None,
+                            email=None,
+                            phone=org.get("phone"),
+                            registered_address=", ".join(x for x in [org.get("street_address"), org.get("city"), org.get("country")] if x) or None,
+                            source="apollo_organizations",
+                            environment=env,
+                            synthetic=False,
+                            stage="DISCOVERING"
+                        )
+                        c.add_evidence(
+                            field_name="company_profile",
+                            field_value={"name": company_name, "domain": c.domain, "industry": org.get("industry")},
+                            source_provider="apollo",
+                            evidence_status=EvidenceStatus.SOURCE_OBSERVED,
+                            confidence=0.80
+                        )
+                        candidates.append(c)
+
+                # 2. People Discovery if capacity remains
+                if hasattr(self.connector, "search_people") and len(candidates) < filter_spec.limit:
+                    people_limit = filter_spec.limit - len(candidates)
+                    query = " ".join(filter_spec.industry_keywords[:2])
+                    people_results = self.connector.search_people(
+                        q_keywords=query,
+                        locations=locations,
+                        per_page=people_limit
                     )
-                    candidates.append(c)
+                    for item in (people_results or []):
+                        org = item.get("organization", {})
+                        company_name = org.get("name") or item.get("company_name", "")
+                        if not company_name:
+                            continue
+                        c = LeadCandidate(
+                            company=company_name,
+                            domain=org.get("primary_domain") or item.get("domain"),
+                            contact_name=item.get("name") or f"{item.get('first_name', '')} {item.get('last_name', '')}".strip() or None,
+                            title=item.get("title"),
+                            email=item.get("email"),
+                            phone=item.get("phone_number") or org.get("phone"),
+                            source="apollo_people",
+                            environment=env,
+                            synthetic=False,
+                            stage="DISCOVERING"
+                        )
+                        c.add_evidence(
+                            field_name="company_profile",
+                            field_value={"name": company_name, "domain": c.domain},
+                            source_provider="apollo",
+                            evidence_status=EvidenceStatus.SOURCE_OBSERVED,
+                            confidence=0.80
+                        )
+                        candidates.append(c)
+
                 self.last_status = "SUCCESS" if candidates else "SUCCESS_EMPTY"
                 return candidates[:filter_spec.limit]
             except Exception as e:

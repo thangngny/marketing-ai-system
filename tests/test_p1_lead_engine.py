@@ -3,7 +3,7 @@ Tests for P1: Dynamic Multi-Source Lead Discovery, Evidence Verification, and Tw
 """
 import pytest
 from marketing_system.constants import Environment
-from marketing_system.models import LeadCandidate
+from marketing_system.models import LeadCandidate, EvidenceStatus
 from marketing_system.lead_engine.discovery import (
     DynamicDiscoveryEngine,
     DiscoveryFilter,
@@ -102,8 +102,15 @@ def test_lead_verifier_and_scorer_pipeline():
     score_card_blocked = scorer.score_candidate(candidate)
     assert score_card_blocked.tier != "Tier 1 - High Priority"
 
-    # 4. Scoring gate: NOT_FOUND_VERIFIED enables Tier 1
+    # 4. Scoring gate: NOT_FOUND_VERIFIED enables Tier 1 (requires corroborating EvidenceItem per FND-V6-009)
     candidate.crm_dedupe_status = "NOT_FOUND_VERIFIED"
+    candidate.add_evidence(
+        field_name="crm_dedupe",
+        field_value={"status": "NOT_FOUND_VERIFIED"},
+        source_provider="zoho_dedupe",
+        evidence_status=EvidenceStatus.SOURCE_CORROBORATED,
+        confidence=0.95,
+    )
     score_card = scorer.score_candidate(candidate)
     assert score_card.data_quality_score >= 80
     assert score_card.commercial_fit_score >= 70

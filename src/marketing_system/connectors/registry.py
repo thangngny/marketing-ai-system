@@ -41,8 +41,8 @@ class ConnectorRegistry:
             )
         }
 
-    def get(self, name: str) -> BaseConnector:
-        return self._connectors[name]
+    def get(self, name: str) -> BaseConnector | None:
+        return self._connectors.get(name)
 
     def reports(self, live_probe: bool = False) -> list[ConnectorReport]:
         return [connector.report(live_probe=live_probe) for connector in self._connectors.values()]

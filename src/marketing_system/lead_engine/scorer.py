@@ -150,7 +150,20 @@ class TwoAxisScorer:
         has_valid_domain = dq_breakdown.get("domain_verified", 0) >= 12
         has_valid_company = dq_breakdown.get("legal_name_verified", 0) >= 15
         dedupe_status = getattr(candidate, "crm_dedupe_status", "NOT_CHECKED")
-        is_dedupe_cleared = (dedupe_status == "NOT_FOUND_VERIFIED") and (not getattr(candidate, "in_crm", False))
+        dedupe_ev = evidence_map.get("crm_dedupe")
+        has_dedupe_evidence = (
+            dedupe_ev is not None
+            and getattr(dedupe_ev, "evidence_status", "") in (
+                EvidenceStatus.VERIFIED,
+                EvidenceStatus.SOURCE_CORROBORATED,
+                "NOT_FOUND_VERIFIED",
+            )
+        )
+        is_dedupe_cleared = (
+            dedupe_status == "NOT_FOUND_VERIFIED"
+            and (not getattr(candidate, "in_crm", False))
+            and has_dedupe_evidence
+        )
 
         tier1_eligible = (
             composite >= 75

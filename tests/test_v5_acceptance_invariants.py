@@ -127,9 +127,10 @@ def test_v5_wave2_crm_dedupe_status_controls_tier1():
     sc4 = scorer.score_candidate(candidate)
     assert sc4.tier != "Tier 1 - High Priority"
 
-    # 5. NOT_FOUND_VERIFIED enables Tier 1
+    # 5. NOT_FOUND_VERIFIED enables Tier 1 (requires corroborating EvidenceItem per FND-V6-009)
     candidate.crm_dedupe_status = "NOT_FOUND_VERIFIED"
     candidate.in_crm = False
+    candidate.add_evidence("crm_dedupe", {"status": "NOT_FOUND_VERIFIED"}, "zoho_dedupe", EvidenceStatus.SOURCE_CORROBORATED, confidence=0.95)
     sc5 = scorer.score_candidate(candidate)
     assert sc5.tier == "Tier 1 - High Priority"
 

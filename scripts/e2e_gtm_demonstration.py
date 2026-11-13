@@ -139,6 +139,8 @@ def run_e2e_demonstration():
         channel_id="buzz:channel:gtm",
     )
     print(f"  ✓ Workflow {wf_run['workflow_id']} khởi chạy -> Trạng thái: {wf_run['state']}")
+    if wf_run.get("error"):
+        print("  ❌ wf_run error:", repr(wf_run.get("error")))
     assert wf_run["state"] == "WAITING_APPROVAL"
     code = wf_run["approval"]["code"]
     print(f"  🛡️ CHỐT PHÊ DUYỆT KÍCH HOẠT: Yêu cầu mã phê duyệt: '{code}' (Summary: {wf_run['approval']['payload_summary'][:80]}...)")
