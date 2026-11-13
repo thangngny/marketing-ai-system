@@ -436,8 +436,18 @@ def test_v10_007_dashboard_dedupe_cleared_strictly_excludes_duplicates(tmp_path)
     from marketing_system.identity import generate_event_id
     import importlib.util
 
-    dash_path = Path(__file__).resolve().parent.parent.parent / "buzz-ai-usage-center" / "bin" / "dashboard.py"
-    assert dash_path.exists(), f"dashboard.py not found at {dash_path}"
+    dash_candidates = [
+        Path(os.environ.get("BUZZ_BUZZ_AI_USAGE_CENTER_DIR", "")) / "bin" / "dashboard.py",
+        Path(__file__).resolve().parent.parent / "buzz-ai-usage-center" / "bin" / "dashboard.py",
+        Path(__file__).resolve().parent.parent.parent / "buzz-ai-usage-center" / "bin" / "dashboard.py",
+        Path.home() / "buzz-ai-usage-center" / "bin" / "dashboard.py",
+    ]
+    dash_path = None
+    for c in dash_candidates:
+        if c.exists():
+            dash_path = c
+            break
+    assert dash_path and dash_path.exists(), f"dashboard.py not found in {dash_candidates}"
 
     spec = importlib.util.spec_from_file_location("dash_v10", str(dash_path))
     dash_mod = importlib.util.module_from_spec(spec)
