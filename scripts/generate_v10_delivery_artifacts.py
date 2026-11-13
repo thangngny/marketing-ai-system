@@ -14,9 +14,18 @@ from pathlib import Path
 DELIVERY_DIR = Path(r"C:\Users\Admin\BUZZ_GTM_V10_DELIVERY")
 DELIVERY_DIR.mkdir(parents=True, exist_ok=True)
 
-REPO_A_COMMIT = "46c466716a65565566aa18142e019afbd4feb061"
-REPO_B_COMMIT = "ca4ca142f26905850fc23be88dea2e192513adc1"
-REPO_C_COMMIT = "fdf4fbaeab0876517e1d29f5adb5d51ba36c1751"
+import subprocess
+
+def get_git_sha(repo_path: str) -> str:
+    try:
+        res = subprocess.run(["git", "-C", repo_path, "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
+        return res.stdout.strip()
+    except Exception:
+        return "UNKNOWN"
+
+REPO_A_COMMIT = get_git_sha(r"C:\Users\Admin\marketing-ai-system")
+REPO_B_COMMIT = get_git_sha(r"C:\Users\Admin\Buzz-Marketing-OS-Enterprise-Suite")
+REPO_C_COMMIT = get_git_sha(r"C:\Users\Admin\buzz-ai-usage-center")
 TIMESTAMP = "2026-11-14T00:22:00+07:00"
 
 print(f"Generating V10 delivery artifacts into {DELIVERY_DIR}...")
