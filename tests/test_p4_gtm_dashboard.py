@@ -54,7 +54,10 @@ def test_gtm_funnel_real_vs_demo_modes():
     assert len(real_data["funnel_stages"]) == 7
     # Real data must not invent fake 12.8B VND if no real deals exist
     assert "crm_protected_vats" in real_data["kpis"]
-    assert real_data["kpis"]["crm_protected_vats"] >= 3600
+    if Path(Path.home() / ".buzz" / "tools" / "zoho_live_vat_cache.json").exists():
+        assert real_data["kpis"]["crm_protected_vats"] >= 3600
+    else:
+        assert real_data["kpis"]["crm_protected_vats"] == 0
     assert "token_encrypted_dpapi" in real_data["crm_security"]
     if Path(Path.home() / ".buzz" / ".scratch" / "zoho_token_cache.json").exists():
         assert real_data["crm_security"]["token_encrypted_dpapi"] is True
