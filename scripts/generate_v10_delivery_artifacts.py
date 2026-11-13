@@ -112,8 +112,8 @@ doc_01 = f"""# BẢNG BÀN GIAO MÃ NGUỒN VÀ SHA COMMIT — RC-V10
 
 ### 2. GITHUB ACTIONS CI RUNS TRÊN CÁC COMMIT MỚI
 
-- **Repo A CI Push Run:** `https://github.com/thangngny/marketing-ai-system/actions/runs/43471915043`
-- **Repo A CI PR Run:** `https://github.com/thangngny/marketing-ai-system/actions/runs/43471927642`
+- **Repo A CI Push Run:** `https://github.com/thangngny/marketing-ai-system/actions/runs/43472829728`
+- **Repo A CI PR Run:** `https://github.com/thangngny/marketing-ai-system/actions/runs/43472843588`
 - **Repo B CI Push Run:** `https://github.com/thangngny/Buzz-Marketing-OS-Enterprise-Suite/actions/runs/43471429921`
 - **Repo B CI PR Run:** `https://github.com/thangngny/Buzz-Marketing-OS-Enterprise-Suite/actions/runs/43471441504`
 - **Repo C CI Push Run:** `https://github.com/thangngny/buzz-ai-usage-center/actions/runs/43471335341`
