@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 from ..constants import Impact
@@ -69,6 +72,21 @@ class ZohoConnector(BaseConnector):
     def _access_context(self) -> tuple[str, str]:
         if self._cached_access_context:
             return self._cached_access_context
+
+        # Check persistent on-disk token cache first
+        cache_path = Path(r"C:\Users\Admin\.buzz\.scratch\zoho_token_cache.json")
+        try:
+            if cache_path.exists():
+                cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+                tok = cache_data.get("access_token")
+                dom = cache_data.get("api_domain")
+                exp = cache_data.get("expires_at", 0)
+                if tok and dom and exp > (time.time() + 120):
+                    self._cached_access_context = str(tok), str(dom)
+                    return self._cached_access_context
+        except Exception:
+            pass
+
         accounts = self.env("ZOHO_ACCOUNTS_URL") or "https://accounts.zoho.com"
         token = self.request(
             "POST",
@@ -81,12 +99,38 @@ class ZohoConnector(BaseConnector):
             },
             timeout=15.0,
         )
+        if token.status_code == 400 and "too many requests" in token.text.lower():
+            # If rate-limited, attempt to use existing cached token even if close to expiry
+            try:
+                if cache_path.exists():
+                    cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+                    tok = cache_data.get("access_token")
+                    dom = cache_data.get("api_domain")
+                    if tok and dom:
+                        self._cached_access_context = str(tok), str(dom)
+                        return self._cached_access_context
+            except Exception:
+                pass
         token.raise_for_status()
         body = token.json()
         access_token = body.get("access_token")
         api_domain = body.get("api_domain") or self.env("ZOHO_API_DOMAIN") or "https://www.zohoapis.com"
+        expires_in = body.get("expires_in", 3600)
         if not access_token:
             raise RuntimeError("Token exchange returned no access token")
+
+        # Persist cache to disk
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps({
+                "access_token": str(access_token),
+                "api_domain": str(api_domain),
+                "expires_at": time.time() + float(expires_in),
+                "saved_at": time.time(),
+            }, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
         self._cached_access_context = str(access_token), str(api_domain)
         return self._cached_access_context
 
